@@ -8,6 +8,7 @@ import sys
 
 from common import AqaraError, Store, control_body, controls, selector, table_rows
 from keychain import KeychainError
+from updater import Updater
 
 
 def item(title, subtitle="", action=None, autocomplete=None, uid=None):
@@ -242,8 +243,32 @@ def device_choices(devices, remainder=""):
             for device in devices]
 
 
-def build_items(query, store=None):
+def build_items(query, store=None, updater=None):
     store = store or Store()
+    updater = updater or Updater(store.root)
+    term = query.strip().casefold()
+    commands = [
+        ("workflow:update", "Check for an Aqara workflow update", "Download the latest release and open Alfred's upgrade dialog", {"action": "workflow_update"}),
+        ("workflow:autoupdate", "Enable automatic update checks", "Check GitHub once a day while using the workflow", {"action": "workflow_autoupdate", "enabled": True}),
+        ("workflow:noautoupdate", "Disable automatic update checks", "You can still check manually with aq workflow:update", {"action": "workflow_autoupdate", "enabled": False}),
+    ]
+    if term == "upgrade":
+        term = "workflow:update"
+    if term.startswith("workflow:"):
+        return [item(title, subtitle, action, keyword, "update:" + keyword)
+                for keyword, title, subtitle, action in commands if keyword.startswith(term)] or [
+                    item("No matching workflow command", "Use aq workflow:update to check for updates", autocomplete="workflow:update")]
+    result = _build_items(query, store)
+    if not term:
+        result.append(item("Workflow updates", "Check for updates or change automatic checks", autocomplete="workflow:"))
+    status = updater.available()
+    if status:
+        result.insert(0, item("Aqara " + status["version"] + " is available", "Install the update · Confirm the upgrade in Alfred",
+                              {"action": "workflow_update"}, "workflow:update", "workflow-update"))
+    return result
+
+
+def _build_items(query, store):
     query = query.strip()
     settings = store.read("settings")
     systems = [
@@ -340,7 +365,10 @@ def build_items(query, store=None):
 
 def main():
     try:
-        result = build_items(sys.argv[1] if len(sys.argv) > 1 else "")
+        store = Store()
+        updater = Updater(store.root)
+        updater.schedule()
+        result = build_items(sys.argv[1] if len(sys.argv) > 1 else "", store, updater)
     except (AqaraError, KeychainError, OSError) as exc:
         result = [item("Aqara unavailable", str(exc))]
         print("Aqara: " + str(exc), file=sys.stderr)

@@ -8,7 +8,10 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 ROOT = Path(__file__).resolve().parent
 FILES = ("info.plist", "icon.png", "workflow.sh", "filter.py", "command.py",
-         "common.py", "keychain.py", "README.md", "LICENSE", "version")
+         "common.py", "keychain.py", "updater.py", "README.md", "LICENSE", "version",
+         "workflow/__init__.py", "workflow/workflow.py", "workflow/util.py",
+         "workflow/web.py", "workflow/update.py", "workflow/background.py",
+         "workflow/version", "workflow/LICENSE")
 
 
 def build(destination=None):

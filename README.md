@@ -20,7 +20,7 @@ This is not a direct LAN or Matter controller.
 ## Install and connect
 
 1. Build the workflow with `python3 workflow-build`, then open
-   `dist/Aqara-0.2.6.alfredworkflow` to import it into Alfred.
+   `dist/Aqara-0.2.7.alfredworkflow` to import it into Alfred.
 2. Type `aq login` in Alfred and press Return. Sign in with your Aqara account.
 3. Copy the **aqara_api_key** shown on the page. Type `aq apikey` in Alfred and
    press Return to paste it into the secure dialog. It is saved in macOS Keychain.
@@ -78,6 +78,9 @@ spaces, quotes, or shell punctuation are supported.
 | `aq login` | Open Aqara's sign-in page |
 | `aq apikey` | Replace the current account's API key using a secure dialog |
 | `aq reinit` | Delete all saved accounts, credentials, home selections, and catalogs |
+| `aq workflow:update` | Check GitHub for a newer workflow and start the upgrade |
+| `aq workflow:autoupdate` | Enable automatic daily update checks (default) |
+| `aq workflow:noautoupdate` | Disable automatic checks; manual updates remain available |
 
 If a device has the same name as a workflow command, use `aq device <name>`.
 Devices with duplicate names include room labels; select the exact result to
@@ -137,6 +140,25 @@ device's resulting state.
 Commands are never retried automatically after a timeout, since they may already
 have been executed by Aqara.
 
+## Workflow updates
+
+The workflow uses the same bundled Alfred-Workflow updater as
+[alfred-hubitat](https://github.com/schwark/alfred-hubitat). It checks GitHub
+Releases in the background once a day while you use `aq`. When a newer stable
+release is available, an update row appears above the search results. Select
+it, or run `aq workflow:update` (`aq upgrade` also works). The workflow downloads
+the release, verifies its SHA-256 checksum, bundle identity, and version, then
+opens Alfred's import dialog. Confirm the upgrade there to finish installing.
+Releases requiring a newer Alfred version are skipped.
+
+Use `aq workflow:noautoupdate` to turn off automatic checks, and
+`aq workflow:autoupdate` to turn them back on. `aq update` continues to refresh
+your Aqara devices, homes, and scenes. Upgrades preserve saved accounts, home
+selections, and Keychain credentials. Update checks use GitHub's public API;
+they do not send Aqara credentials or account data. Updater settings, cached
+release information, downloads, and logs live under `workflow-updates/` in the
+workflow data directory, separate from each account's settings.
+
 ## Local data
 
 API keys are generic passwords in macOS Keychain with service
@@ -182,6 +204,14 @@ Python are supported.
 `common.py` manages Aqara requests and the catalog, and `keychain.py` uses the
 native Security framework. API requests are fixed to the official HTTPS host;
 redirects are rejected so the bearer key is not forwarded elsewhere.
+
+`workflow/` vendors the Python 3 Alfred-Workflow port bundled with Hubitat
+(Alpynist 2.0.0), originally by Dean Jackson and ported by Arthur Pinheiro.
+Its MIT license is in `workflow/LICENSE`. Local changes preserve the active
+Python interpreter and isolated updater directories in background jobs, skip
+draft releases, and verify GitHub asset checksums and workflow metadata before
+opening an update. The port's lock files are also closed explicitly for current
+Python compatibility. No external Python packages are needed.
 
 ## API references
 

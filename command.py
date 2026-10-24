@@ -7,6 +7,7 @@ import sys
 
 from common import AqaraError, Client, LOGIN_URL, Store, control_body, normalize, selector
 from keychain import KeychainError
+from updater import Updater
 
 
 def prompt_key():
@@ -30,6 +31,16 @@ def prompt_profile_name():
 def execute(action, store=None):
     store = store or Store()
     name = action.get("action")
+    if name == "workflow_update":
+        return Updater(store.root).install()
+    if name == "workflow_autoupdate":
+        if type(action.get("enabled")) is not bool:
+            raise AqaraError("Choose whether to enable automatic update checks.")
+        updater = Updater(store.root)
+        updater.set_enabled(action["enabled"])
+        if action["enabled"]:
+            updater.schedule()
+        return "Automatic workflow update checks " + ("enabled." if action["enabled"] else "disabled.")
     if name == "login":
         subprocess.run(["/usr/bin/open", LOGIN_URL], check=True)
         return "Sign in, then use aq apikey to save your API key."
