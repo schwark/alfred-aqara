@@ -151,6 +151,8 @@ activemq-data/
 
 # Environments
 .env
+*.alfredworkflow
+.DS_Store
 .envrc
 .venv
 env/
