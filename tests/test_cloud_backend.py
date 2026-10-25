@@ -399,9 +399,12 @@ class CloudTransportAndPackageTest(unittest.TestCase):
                 self.assertEqual(info["version"], archive.read("version").decode().strip())
                 self.assertIn("cloud_backend.py", archive.namelist())
                 self.assertIn("runtime.py", archive.namelist())
-                self.assertFalse(any(name.startswith(("tools/", ".cache/", "tests/")) or name.endswith(".json") for name in archive.namelist()))
+                self.assertFalse(any(name.startswith(("tools/", ".cache/", "tests/")) or
+                                     name.endswith(".json") for name in archive.namelist()))
                 self.assertIn("cloud_capabilities.py", archive.namelist())
-                self.assertEqual(len(archive.namelist()), 24)
+                self.assertEqual(len(archive.namelist()), 26)
+                self.assertIn("cloud-identity.LICENSE", archive.namelist())
+                self.assertIn("cloud_identity.py", archive.namelist())
         self.assertEqual((root / "info.plist").read_bytes(), original)
 
     def test_updater_ignores_earlier_parallel_packages(self):

@@ -17,6 +17,7 @@ from cloud_capabilities import (compile_traits, definition_endpoints, objects, p
                                 trait_status, validate_control)
 from keychain import Keychain
 from cloud_transport import ALLOWED, AppIdentity, CloudAPIError, CloudClient
+from cloud_identity import public_identity
 
 
 BUNDLE = "com.schwark.aqara.cloud"
@@ -32,25 +33,24 @@ def identity_key():
     return Keychain(service=BUNDLE, account="app-identity")
 
 
+def public_identity_key():
+    return Keychain(service=BUNDLE, account="public-app-identity")
+
+
 def save_identity(reference):
-    identity = AppIdentity.from_reference(reference)
-    identity_key().set(json.dumps({"app_id": identity.app_id, "app_key": identity.app_key,
-                                  "modulus": identity.modulus, "exponent": identity.exponent,
-                                  "version": identity.version}))
+    identity = (AppIdentity.from_json(reference) if Path(reference).suffix.casefold() == ".json"
+                else AppIdentity.from_reference(reference))
+    identity_key().set(json.dumps(identity.payload()))
 
 
 def load_identity():
+    override = identity_key().get()
+    if not override:
+        return public_identity(public_identity_key())
     try:
-        value = json.loads(identity_key().get() or "{}")
-        identity = AppIdentity(**value)
-        if (not isinstance(identity.app_id, str) or not re.fullmatch(r"[A-Za-z0-9]{8,64}", identity.app_id)
-                or not isinstance(identity.app_key, str) or not 16 <= len(identity.app_key) <= 128
-                or type(identity.modulus) is not int or not 1024 <= identity.modulus.bit_length() <= 8192
-                or identity.exponent != 65537):
-            raise ValueError()
-        return identity
-    except (ValueError, TypeError):
-        raise AqaraError("Import the Cloud signing identity with aq identity first.") from None
+        return AppIdentity.from_payload(json.loads(override))
+    except (ValueError, TypeError, CloudAPIError):
+        raise AqaraError("The advanced Cloud signing override is invalid. Use aq identity to replace it.") from None
 
 
 def page_rows(value, kind):
@@ -612,7 +612,7 @@ class CloudStore(Store):
         if name == "mobile_import":
             return self.import_agent()
         if name == "mobile_identity":
-            result = subprocess.run(["/usr/bin/osascript", "-e", 'POSIX path of (choose file with prompt "Select the external app identity reference (const.py)")'], capture_output=True, text=True)
+            result = subprocess.run(["/usr/bin/osascript", "-e", 'POSIX path of (choose file with prompt "Select an advanced Cloud signing override (cloud-identity.json or const.py)")'], capture_output=True, text=True)
             if result.returncode:
                 return "Identity import cancelled."
             save_identity(result.stdout.strip())
@@ -676,7 +676,7 @@ class CloudStore(Store):
                     item("Native scenes", "%s discovered · Native scenes use the app API; existing Agent scenes retain their route" % catalog.get("native_scene_count", 0)),
                     item("Partial metadata reads", "%s devices have an unavailable metadata route" % catalog.get("native_capability_failures", 0))]
         extra = [("import", "Import current Agent profiles", "Copy accounts and cached catalogs; keep Agent mode unchanged", "mobile_import"),
-                 ("identity", "Import Cloud signing identity", "Read a separately obtained constant reference into Keychain", "mobile_identity"),
+                 ("identity", "Override Cloud signing configuration", "Advanced only; normal login downloads and caches the verified configuration automatically", "mobile_identity"),
                  ("parity", "Compare Cloud coverage", "Show Cloud lock commands and Agent fallback coverage", None)]
         if term in ("import", "identity"):
             return [item(title, subtitle, {"action": action}) for key, title, subtitle, action in extra if key == term]
@@ -695,5 +695,5 @@ class CloudStore(Store):
         if not term:
             items = [i for i in items if i["title"] != "Set up Aqara"]
             items.extend(item(title, subtitle, {"action": action} if action else None, key)
-                         for key, title, subtitle, action in extra)
+                         for key, title, subtitle, action in extra if key != "identity")
         return items

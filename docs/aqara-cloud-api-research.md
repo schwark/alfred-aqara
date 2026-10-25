@@ -193,10 +193,12 @@ prerequisite for the verified reads.
 
 ### App identity and password encoding
 
-The starting reference supplies `APPID`, `APPKEY`, `RSA_N`, and `RSA_E`
+The public reference supplies `APPID`, `APPKEY`, `RSA_N`, and `RSA_E`
 in `custom_components/aquara_local/const.py`. These are app constants,
 distinct from an account password, session token, or lock-pairing key.
-Their values are deliberately not copied into this document or repository.
+Their values are not copied into this document or tracked Git files. From
+v0.3.2, the workflow automatically fetches and caches this shared configuration
+from the hash-pinned public reference.
 The loader in [mobile_api.py](../tools/mobile_api.py) parses literal
 assignments using Python's AST and never imports or executes that file.
 
@@ -939,7 +941,7 @@ reference or embeds its shared app keys in source control. Each sign-in
 requires an explicit API area and country district; authentication is not
 automatically retried.
 
-The full release suite passes 160 tests on Python 3.9 and 3.14. Coverage includes
+The full release suite passes 172 tests on Python 3.9 and 3.14. Coverage includes
 encryption, signing, reference parsing, regional routing, safe errors, read-only
 capture guards, shared capability discovery, Agent fallback, multi-home
 selection, mode persistence, migration rollback, stale-action rejection, and
@@ -1275,3 +1277,32 @@ Cloud rows before search, status, command validation, or home switching. It
 removes the old cross-source display suffix where applicable and rebuilds
 room labels without merging different Cloud devices by name. This takes effect
 without a network refresh and leaves the original Agent mode data untouched.
+
+
+### Automatic shared configuration in 0.3.2
+
+`cloud_identity.py` fetches the commit-pinned public reference automatically on
+first Cloud use. It verifies SHA-256 and a 64 KiB limit before parsing only
+`APPID`, `APPKEY`, `RSA_N`, and `RSA_E` with the literal-only AST parser.
+Downloaded Python is never executed or saved as a source file. Requests use
+HTTPS, reject redirects, and include no Aqara credentials or signing headers.
+
+Only the validated app fields and reference SHA-256 are cached under Keychain
+account `public-app-identity` in service `com.schwark.aqara.cloud`. A valid cache
+avoids later GitHub requests; a corrupt cache or changed pin triggers a new
+verified fetch. `app-identity` remains the separate advanced manual override.
+A failed fetch writes no configuration and returns a safe retry diagnostic.
+Account/session fields are rejected by the app-configuration schema.
+
+Neither app values nor a downloaded const file are bundled or committed.
+The package includes the loader and `cloud-identity.LICENSE` attribution.
+Tests use synthetic reference content and cover first-use login, cache reuse,
+malformed/stale cache recovery, changed/oversized upstream data, network errors,
+manual overrides, and keeping account data off the public request.
+
+A replacement Mac recovers configuration from the same public source when it
+first connects. This requires GitHub and the pinned reference to be available;
+configured Macs use Keychain. The identity authenticates the app client to
+Aqara's cloud API, not a lock pairing. Requests still address device endpoints
+through Aqara's regional HTTPS service; the tested U100 route uses its M3.
+No direct Bluetooth or LAN lock transport was introduced.

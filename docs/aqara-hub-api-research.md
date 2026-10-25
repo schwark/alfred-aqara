@@ -4,7 +4,7 @@ Version 0.3.0 ships the verified cloud route in the single Aqara workflow.
 Use `aq mode cloud` for Cloud controls or `aq mode agent` for the default
 Agent connection. See [Cloud setup](../README-cloud.md), the
 [Cloud API report](aqara-cloud-api-research.md), and
-[release notes](releases/v0.3.1.md). LANLink remains optional research.
+[release notes](releases/v0.3.2.md). LANLink remains optional research.
 
 ## Objective and correction
 

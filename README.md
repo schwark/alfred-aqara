@@ -23,7 +23,7 @@ devices from the selected mode; Cloud does not append the Agent inventory.
 - Python 3.9 or newer, installed from [python.org](https://www.python.org/downloads/macos/)
   or Homebrew (`brew install python`). No Python packages are required.
 - Agent mode: an account that can sign in to [Aqara Agent](https://agent.aqara.com/login).
-- Cloud mode: an Aqara Home login and a separately imported signing identity;
+- Cloud mode: an Aqara Home login; shared signing setup is automatic.
   see [Cloud requirements](README-cloud.md#requirements).
 
 ## Install and connect
@@ -31,9 +31,9 @@ devices from the selected mode; Cloud does not append the Agent inventory.
 These steps connect the default Agent mode. For Cloud, switch with `aq mode cloud`
 and follow [the Cloud setup guide](README-cloud.md#connect-cloud-mode).
 
-1. Download [Aqara-0.3.1.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.1/Aqara-0.3.1.alfredworkflow)
+1. Download [Aqara-0.3.2.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.2/Aqara-0.3.2.alfredworkflow)
    and open it to import into Alfred. To build from source, run
-   `python3 workflow-build` and open `dist/Aqara-0.3.1.alfredworkflow`.
+   `python3 workflow-build` and open `dist/Aqara-0.3.2.alfredworkflow`.
 2. Type `aq login` in Alfred and press Return. Sign in with your Aqara account.
 3. Copy the **aqara_api_key** shown on the page. Type `aq apikey` in Alfred and
    press Return to paste it into the secure dialog. It is saved in macOS Keychain.
@@ -56,7 +56,7 @@ before switching must be selected again afterward.
 | Mode | Connection | Controls |
 | --- | --- | --- |
 | Agent (default) | Aqara Agent API key | Existing device controls and scenes; locks show status |
-| Cloud | Aqara Home session and signing identity | Advertised lock/unlock, power, brightness, and color temperature; Exact Agent matches can add controls on the same Cloud row |
+| Cloud | Aqara Home session and automatically fetched app configuration | Advertised lock/unlock, power, brightness, and color temperature; Exact Agent matches can add controls on the same Cloud row |
 
 Each mode remembers its own accounts, selected home, catalogs, and status
 preferences. Updates apply to the one workflow, and `aq reinit` resets only
@@ -67,7 +67,7 @@ connections remain available. Then use `aq mode cloud` and follow
 [the Cloud guide](README-cloud.md#connect-cloud-mode) if you want Cloud controls.
 For migration from the earlier parallel workflow, see
 [Cloud migration](README-cloud.md#upgrading-from-the-parallel-workflow).
-Changes and validation are in the [v0.3.1 release notes](docs/releases/v0.3.1.md).
+Changes and validation are in the [v0.3.2 release notes](docs/releases/v0.3.2.md).
 
 ## Commands
 
@@ -242,6 +242,20 @@ accounts and homes, migration from the earlier parallel workflow, and limitation
 The [API research notes](docs/aqara-cloud-api-research.md) describe the underlying
 app protocol. Both modes share one package and update channel.
 
+## Cloud setup on a new Mac
+
+Run `aq mode cloud`, then `aq login`. The workflow automatically downloads a
+commit-pinned public app-signing reference, verifies its SHA-256, parses the
+constants without execution, and caches the values in Keychain. It sends no
+Aqara credentials to GitHub. Later uses need no download while the cached
+reference is current.
+
+Losing a Mac does not require recovering a local `const.py`: a replacement Mac
+fetches the shared configuration automatically, then you sign in again. Initial
+setup requires GitHub access. No shared app values or personal credentials are
+included in the workflow package. See
+[automatic Cloud setup](README-cloud.md#automatic-signing-setup-and-recovery).
+
 ## Development
 
 ```sh
@@ -256,7 +270,7 @@ profile. The build uses an explicit file allowlist and excludes local data,
 tests, `.git`, and credentials. Both macOS's Python 3.9 and current Homebrew
 Python are supported.
 
-The v0.3.1 suite passes 160 offline tests on Python 3.9 and 3.14. Tests cover
+The v0.3.2 suite passes 172 offline tests on Python 3.9 and 3.14. Tests cover
 mode persistence, migration rollback, account/home isolation, stale selections,
 native capability checks, retained Agent controls, and verified update downloads.
 The offline suite does not send physical device commands.
@@ -280,6 +294,11 @@ Python interpreter and isolated updater directories in background jobs, skip
 draft releases, and verify GitHub asset checksums and workflow metadata before
 opening an update. The port's lock files are also closed explicitly for current
 Python compatibility. No external Python packages are needed.
+
+`cloud_identity.py` handles automatic public-reference download and Keychain
+caching at runtime. The build reads only the explicit source-file allowlist;
+it never accesses Keychain or fetches production app values. Tests use invented
+fixtures and require no network or production signing values.
 
 ## API references
 

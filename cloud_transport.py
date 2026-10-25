@@ -1,8 +1,8 @@
 """Shared signed transport for the Aqara Cloud backend.
 
 Wire-format reference: home-assistant-plugins/aquara-local at
-4fc274688cd40774307549172c9ae1db073c92ca (MIT). App constants are loaded from
-that separately obtained reference, never embedded here. Credentials and
+4fc274688cd40774307549172c9ae1db073c92ca (MIT). Shared app constants are fetched
+automatically from the verified reference and cached in Keychain. Credentials and
 sessions stay in memory. Runtime storage and capability-bound writes are
 implemented separately in cloud_backend.
 """
@@ -75,12 +75,51 @@ class AppIdentity:
     exponent: int = 65537
     version: str = "6.1.6"
 
+    def payload(self):
+        return {"app_id": self.app_id, "app_key": self.app_key, "modulus": self.modulus,
+                "exponent": self.exponent, "version": self.version}
+
+    @classmethod
+    def from_payload(cls, value):
+        try:
+            if not isinstance(value, dict) or set(value) - {"app_id", "app_key", "modulus", "exponent", "version"}:
+                raise ValueError()
+            identity = cls(**value)
+            if (not isinstance(identity.app_id, str) or not re.fullmatch(r"[A-Za-z0-9]{8,64}", identity.app_id)
+                    or not isinstance(identity.app_key, str) or not 16 <= len(identity.app_key) <= 128
+                    or type(identity.modulus) is not int or not 1024 <= identity.modulus.bit_length() <= 8192
+                    or identity.exponent != 65537 or not isinstance(identity.version, str)
+                    or not re.fullmatch(r"\d+(?:\.\d+){1,3}", identity.version)):
+                raise ValueError()
+            return identity
+        except (TypeError, ValueError):
+            raise CloudAPIError("The Cloud signing configuration is missing or invalid.") from None
+
+    @classmethod
+    def from_json(cls, filename):
+        try:
+            with Path(filename).open("rb") as stream:
+                raw = stream.read(16385)
+            if len(raw) > 16384:
+                raise ValueError()
+            return cls.from_payload(json.loads(raw))
+        except (OSError, ValueError, UnicodeError):
+            raise CloudAPIError("The Cloud signing configuration is missing or invalid.") from None
+
     @classmethod
     def from_reference(cls, filename):
         """Read only literal constants; imports and other Python are never executed."""
         try:
+            return cls.from_reference_text(Path(filename).read_text())
+        except (OSError, UnicodeError):
+            raise CloudAPIError("The Cloud signing reference constants are missing or invalid.") from None
+
+    @classmethod
+    def from_reference_text(cls, source):
+        """Treat downloaded Python as data; never import or execute it."""
+        try:
             values = {}
-            for node in ast.parse(Path(filename).read_text()).body:
+            for node in ast.parse(source).body:
                 if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
                     continue
                 name = node.targets[0].id
@@ -94,13 +133,8 @@ class AppIdentity:
                         values[name] = int(ast.literal_eval(expression.args[0]), 16)
                     else:
                         values[name] = ast.literal_eval(expression)
-            identity = cls(values["APPID"], values["APPKEY"], values["RSA_N"], values["RSA_E"])
-            if (not isinstance(identity.app_id, str) or not re.fullmatch(r"[a-zA-Z0-9]{8,64}", identity.app_id)
-                    or not isinstance(identity.app_key, str) or not 16 <= len(identity.app_key) <= 128
-                    or type(identity.modulus) is not int or not 1024 <= identity.modulus.bit_length() <= 8192
-                    or identity.exponent != 65537):
-                raise ValueError()
-            return identity
+            return cls.from_payload({"app_id": values["APPID"], "app_key": values["APPKEY"],
+                                     "modulus": values["RSA_N"], "exponent": values["RSA_E"]})
         except (OSError, ValueError, TypeError, KeyError, SyntaxError):
             raise CloudAPIError("The Cloud signing reference constants are missing or invalid.") from None
 

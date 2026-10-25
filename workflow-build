@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent
 FILES = ("info.plist", "icon.png", "workflow.sh", "filter.py", "command.py",
          "common.py", "keychain.py", "updater.py", "runtime.py", "README.md", "README-cloud.md", "LICENSE", "version",
          "cloud_transport.py", "cloud_backend.py", "cloud_capabilities.py",
+         "cloud_identity.py", "cloud-identity.LICENSE",
          "workflow/__init__.py", "workflow/workflow.py", "workflow/util.py",
          "workflow/web.py", "workflow/update.py", "workflow/background.py",
          "workflow/version", "workflow/LICENSE")

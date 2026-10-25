@@ -34,7 +34,6 @@ undocumented app APIs and remains experimental.
 - macOS with Alfred 5 and a Powerpack license.
 - Python 3.9 or newer; no additional Python packages are required.
 - An Aqara Home account with devices in the account's selected region.
-- A separately obtained app-identity reference for signing Cloud API requests.
 - An optional Aqara Agent connection for additional controls on exactly matched Cloud endpoints.
 
 The Mac needs internet access. A hub IP address, Home Assistant, an Android
@@ -43,13 +42,13 @@ option; it does not require a second workflow or keyword.
 
 ## Connect Cloud mode
 
-Install [Aqara-0.3.1.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.1/Aqara-0.3.1.alfredworkflow)
+Install [Aqara-0.3.2.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.2/Aqara-0.3.2.alfredworkflow)
 from [GitHub Releases](https://github.com/schwark/alfred-aqara/releases/latest).
 Both modes are included. To build from the repository instead:
 
 ```sh
 python3 workflow-build
-open dist/Aqara-0.3.1.alfredworkflow
+open dist/Aqara-0.3.2.alfredworkflow
 ```
 
 1. Run `aq mode cloud`. If the earlier parallel workflow was configured,
@@ -57,14 +56,11 @@ open dist/Aqara-0.3.1.alfredworkflow
    mode automatically. Otherwise, run `aq import` before adding Cloud accounts
    to copy your Agent profiles, cached catalogs, and fallback keys. Agent mode
    keeps its existing setup.
-2. If the signing identity was not migrated, run `aq identity` and select the
-   external `const.py` containing `APPID`, `APPKEY`, `RSA_N`, and `RSA_E`.
-   The reference used during development is
-   [aquara-local at this pinned revision](https://github.com/home-assistant-plugins/aquara-local/blob/4fc274688cd40774307549172c9ae1db073c92ca/custom_components/aquara_local/const.py).
-   Only literal assignments are read; the file is never executed. The imported
-   app identity is saved in Keychain and is excluded from source and packages.
-3. For each profile that needs a Cloud session, select it with `aq account`,
-   then run `aq login`. Migrated sessions can be used immediately.
+2. Run `aq login` for each profile that needs a Cloud session. The workflow
+   automatically downloads and caches its shared app-signing configuration,
+   so a new Mac needs no manual identity download or import. Select an existing
+   profile with `aq account` before connecting it. Migrated sessions can be used
+   immediately.
    Without imported profiles, use `aq login` for the initial connection.
    Enter the Aqara Home area, two-letter country, username, and password in
    dialogs. Choose the region used by that account in Aqara Home:
@@ -75,10 +71,10 @@ open dist/Aqara-0.3.1.alfredworkflow
    | United States | `US` | `US` |
    | Other supported areas | `EU`, `CN`, or `KR` | Account country code |
 
-4. Run `aq home` to select a home, then `aq update` to refresh its devices
+3. Run `aq home` to select a home, then `aq update` to refresh its devices
    and scenes. Run `aq parity` to inspect native commands and Agent fallback
    coverage. Repeat login for each imported account/region.
-5. If the same home appears separately from Agent and Cloud discovery,
+4. If the same home appears separately from Agent and Cloud discovery,
    select its Agent entry and run `aq home link` to choose the Cloud
    counterpart. Run `aq update` afterward. Use `aq home unlink` to remove
    that association.
@@ -215,24 +211,54 @@ Complete an upgrade in Alfred's import dialog. Saved accounts, home links,
 and Keychain credentials live outside the installed workflow and survive
 upgrades. `aq update` refreshes devices and scenes; it does not upgrade the workflow.
 
+## Automatic signing setup and recovery
+
+The “Cloud identity” is shared app configuration, not a personal identity or a
+lock-pairing key. Starting with v0.3.2, the first Cloud use automatically fetches
+[the pinned public reference](https://github.com/home-assistant-plugins/aquara-local/blob/4fc274688cd40774307549172c9ae1db073c92ca/custom_components/aquara_local/const.py),
+checks its SHA-256 and size, and parses only the required literal constants.
+The Python source is never executed or retained as a downloaded file. The
+request sends no Aqara account credentials, tokens, or signing headers to GitHub.
+
+Only the parsed values and reference hash are cached in macOS Keychain. Later
+uses need no GitHub request while that cache matches the pinned reference.
+A new Mac recovers the same configuration automatically when you run `aq login`;
+you do not need the old laptop or a copy of `const.py`. Initial setup requires
+access to GitHub and the pinned reference; a temporary fetch failure asks you
+to retry login rather than handling files manually.
+
+The app values are not bundled in releases or committed source. Source contains
+only the reference URL/hash and loader; attribution is in `cloud-identity.LICENSE`.
+Personal passwords and sessions remain separate. You sign in again on a
+replacement Mac. No developer-account registration or lock pairing is needed
+for this configuration.
+
+`aq identity` remains an advanced manual override for a custom `const.py` or
+JSON configuration. Normal setup does not use it, and it is omitted from the
+default command list. Existing valid Keychain overrides continue to work.
+
 ## Local data and privacy
 
 The workflow bundle is `com.schwark.aqara`. Cloud credentials use the separate
-Keychain service `com.schwark.aqara.cloud`, with accounts `connection:<profile-id>`
-and `app-identity` for the signing identity. Cloud account labels, catalogs, home
-links, and five-second status caches live under:
+Keychain service `com.schwark.aqara.cloud`, with accounts `connection:<profile-id>`,
+an optional `app-identity` advanced override, and `public-app-identity` for
+the automatically fetched shared configuration and reference hash. Cloud account
+labels, catalogs, home links, and five-second status caches live under:
 
 ```text
 ~/Library/Application Support/Alfred/Workflow Data/com.schwark.aqara/cloud/
 ```
 
 `aq reinit` resets only the selected mode's connections, credentials, home
-selections, and catalogs. In Cloud mode the signing identity remains in Keychain
-for reconnecting accounts. Agent mode's data stays in the parent workflow data
-directory, and `mode.json` stores the operating-mode choice.
+selections, and catalogs. The shared configuration cache and any advanced
+Keychain override remain available for reconnecting accounts. Agent mode's data
+stays in the parent workflow data directory, and `mode.json` stores the
+operating-mode choice.
 
 Packages use an explicit file allowlist. They contain no saved accounts,
-home/device records, app constants, credentials, APKs, or traffic captures.
+home/device records, account passwords, session tokens, Agent API keys, APKs,
+or traffic captures. Shared app values are fetched from the public reference
+and kept in Keychain, not included in the package.
 Research tools are excluded from the workflow; see the
 [Cloud API research notes](https://github.com/schwark/alfred-aqara/blob/main/docs/aqara-cloud-api-research.md)
 for protocol details and read-only capture tools.
