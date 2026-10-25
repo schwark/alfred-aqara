@@ -95,6 +95,22 @@ class MobileAPITest(unittest.TestCase):
         self.assertTrue(request.full_url.endswith('/res/query/by/resourceId'))
         self.assertEqual(json.loads(request.data), {'data': [{'subjectId': 'example-device', 'options': ['7.148.32970.1']}]})
 
+    def test_zigbee_panels_and_traits_are_read_only_without_subscription(self):
+        self.client.token = 'example-token'
+        self.response({'code': 0, 'result': []})
+        self.client.panels('example-device')
+        request = self.opener.open.call_args[0][0]
+        self.assertTrue(request.full_url.endswith('/app/layout/collection/panels?subjectIds=example-device&types=device_endpoint_panel'))
+        self.response({'code': 0, 'result': []})
+        self.client.traits('example-device', ['2.148.32970', '2.148.33026'])
+        request = self.opener.open.call_args[0][0]
+        self.assertTrue(request.full_url.endswith('/app/qlink/trait/read'))
+        self.assertEqual(json.loads(request.data), {'devices': [{'deviceId': 'example-device', 'traits': [
+            {'path': '2.148.32970', 'needSubscribe': False}, {'path': '2.148.33026', 'needSubscribe': False}]}], 'needParam': True})
+        for paths in ([], ['2.148.32970.1'], ['arbitrary']):
+            with self.assertRaises(MobileAPIError):
+                self.client.traits('example-device', paths)
+
     def test_no_session_prevents_network_and_missing_user_id_rejects_session(self):
         with self.assertRaises(MobileAPIError):
             self.client.homes()

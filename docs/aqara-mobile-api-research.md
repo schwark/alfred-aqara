@@ -19,6 +19,15 @@ Contents:
 - [Runtime capture and recovered common control API](#runtime-capture-and-recovered-common-control-api)
 - [Probe usage, validation, and remaining work](#probe-validation-and-remaining-work)
 
+## Hub-first investigation
+
+The intended integration is Alfred → M3 → devices. The lock-plugin findings
+below apply to their inspected branches; they do not rule out a shared hub
+transport or the M3's Matter bridge. See [the M3 hub API research](aqara-hub-api-research.md)
+for recovered LANLink sessions, generic hub/child addressing, non-Matter trait
+introspection, and the revised validation plan. Lock-specific Bluetooth
+provisioning is not assumed to be a prerequisite for the hub approach.
+
 ## Finding
 
 Mobile-account authentication, home/device discovery, and lock-state reads

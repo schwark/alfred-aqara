@@ -63,6 +63,14 @@ a write. Unmatched mobile devices remain separate entries; a matching display
 name gets a `(Mobile)` suffix. If the APIs expose different IDs, select the
 mobile home/device explicitly. Multi-endpoint locks receive separate entries.
 
+## Hub-first investigation
+
+The next transport target is the M3 itself. The current lock-plugin paths do
+not establish that hub control requires phone-to-lock pairing. See the
+[M3 hub research](https://github.com/schwark/alfred-aqara/blob/codex/aqara-mobile-api/docs/aqara-hub-api-research.md).
+The installed experiment currently retains the Agent baseline while this hub
+transport is validated; it does not yet implement LANLink control.
+
 ## Lock behavior and limitations
 
 The common Android helper builds this signed request:

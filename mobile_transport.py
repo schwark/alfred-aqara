@@ -35,9 +35,12 @@ RESOURCES = "/res/query"
 PLUGINS = "/app/rn/latest/list"
 MATTER_DETAIL = "/matter/dev/detail"
 MATTER_RESOURCES = "/res/query/by/resourceId"
+TRAIT_READ = "/app/qlink/trait/read"
+PANELS = "/app/layout/collection/panels"
 ALLOWED = {("POST", LOGIN), ("GET", HOMES), ("GET", DEVICES),
            ("GET", DETAIL), ("POST", RESOURCES), ("GET", PLUGINS),
-           ("GET", MATTER_DETAIL), ("POST", MATTER_RESOURCES)}
+           ("GET", MATTER_DETAIL), ("POST", MATTER_RESOURCES),
+           ("POST", TRAIT_READ), ("GET", PANELS)}
 MAX_RESPONSE = 4 * 1024 * 1024
 
 
@@ -198,3 +201,14 @@ class MobileClient:
     def matter_status(self, device_id, resources):
         return self._call("POST", MATTER_RESOURCES, {"data": [{"subjectId": device_id,
                             "options": list(resources)}]})
+
+    def panels(self, device_id):
+        """Read endpoint paths for Zigbee and hub devices without assuming Matter."""
+        return self._call("GET", PANELS, {"subjectIds": device_id, "types": "device_endpoint_panel"})
+
+    def traits(self, device_id, paths):
+        paths = list(paths)
+        if not paths or len(paths) > 300 or any(not isinstance(path, str) or not re.fullmatch(r"\d+\.\d+\.\d+", path) for path in paths):
+            raise MobileAPIError("Choose explicit three-part trait paths from device metadata.")
+        return self._call("POST", TRAIT_READ, {"devices": [{"deviceId": device_id,
+            "traits": [{"path": path, "needSubscribe": False} for path in paths]}], "needParam": True})
