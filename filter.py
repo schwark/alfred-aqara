@@ -108,11 +108,15 @@ def account_items(query, store):
             continue
         target = store.for_profile(profile["id"])
         settings = target.read("settings")
-        subtitle = ("Current account" if profile["id"] == store.profile_id else "Switch account")
-        subtitle += " · %s homes" % len(settings.get("homes", []))
+        current = profile["id"] == store.profile_id
+        subtitle = "Current account" if current else "Switch to this account"
+        count = len(settings.get("homes", []))
+        subtitle += " · %s %s" % (count, "home" if count == 1 else "homes")
         if settings.get("home_name"):
             subtitle += " · " + settings["home_name"]
-        result.append(item(profile["name"], subtitle, {"action": "account", "profile_id": profile["id"]}, uid="account:" + profile["id"]))
+        result.append((not current, item(profile["name"], subtitle, {"action": "account", "profile_id": profile["id"]})))
+    result.sort(key=lambda entry: (entry[0], entry[1]["title"].casefold()))
+    result = [entry[1] for entry in result]
     if not term:
         result.extend([
             item("Add an account or region…", "Sign in with aq login, then save its key under a name", autocomplete="account add "),
@@ -273,6 +277,7 @@ def device_choices(devices, remainder=""):
 def build_items(query, store=None, updater=None):
     term = query.strip().casefold()
     refresh_query = bool(term) and "update".startswith(term)
+    account_query = term.partition(" ")[0] in ("account", "accounts")
     if term.partition(" ")[0] == "mode":
         root = getattr(store, "workflow_root", store.root) if store is not None else workflow_root()
         current = mode_state(root)[0]
@@ -320,12 +325,13 @@ def build_items(query, store=None, updater=None):
     if status:
         if refresh_query:
             result = [row for row in result if json.loads(row.get("arg", "{}")).get("action") != "workflow_update"]
-        result.insert(1 if refresh_query else 0, item("Aqara " + status["version"] + " is available", "Install the update · Confirm the upgrade in Alfred",
+        position = len(result) if account_query else (1 if refresh_query else 0)
+        result.insert(position, item("Aqara " + status["version"] + " is available", "Install the update · Confirm the upgrade in Alfred",
                               {"action": "workflow_update"}, "workflow:update", "workflow-update"))
     if not result:
         result = [item("No matching devices or scenes", "Try a room or device name, or aq update to refresh")]
     for row in result:
-        if refresh_query:
+        if refresh_query or account_query:
             # Removing UIDs also ignores ordering already learned by Alfred.
             row.pop("uid", None)
         if "arg" in row:
@@ -446,7 +452,8 @@ def main():
         result = [item("Aqara unavailable", str(exc))]
         print("Aqara: " + str(exc), file=sys.stderr)
     response = {"items": result}
-    if query.strip() and "update".startswith(query.strip().casefold()):
+    term = query.strip().casefold()
+    if (term and "update".startswith(term)) or term.partition(" ")[0] in ("account", "accounts"):
         response["skipknowledge"] = True
     if refresh:
         response["rerun"] = 0.5

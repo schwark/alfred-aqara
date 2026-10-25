@@ -259,8 +259,19 @@ class Store:
         self._write_path(self.directory / (name + ".json"), value)
 
     def profiles(self):
-        return self._read_path(self.root / "accounts.json").get(
+        profiles = self._read_path(self.root / "accounts.json").get(
             "profiles", [{"id": "default", "name": "Current account"}])
+        result = []
+        for profile in profiles:
+            profile = dict(profile)
+            if not profile.get("name") or profile["name"].casefold() == "current account":
+                directory = self.root if profile["id"] == "default" else self.root / "profiles" / profile["id"]
+                settings = self._read_path(directory / "settings.json")
+                # Older connections used a status phrase as their saved name.
+                # Resolve a local display label without reading credentials.
+                profile["name"] = settings.get("home_name") or "Aqara account"
+            result.append(profile)
+        return result
 
     def profile_name(self):
         return next(profile["name"] for profile in self.profiles() if profile["id"] == self.profile_id)

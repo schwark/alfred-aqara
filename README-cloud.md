@@ -42,13 +42,13 @@ option; it does not require a second workflow or keyword.
 
 ## Connect Cloud mode
 
-Install [Aqara-0.3.5.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.5/Aqara-0.3.5.alfredworkflow)
+Install [Aqara-0.3.6.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.6/Aqara-0.3.6.alfredworkflow)
 from [GitHub Releases](https://github.com/schwark/alfred-aqara/releases/latest).
 Both modes are included. To build from the repository instead:
 
 ```sh
 python3 workflow-build
-open dist/Aqara-0.3.5.alfredworkflow
+open dist/Aqara-0.3.6.alfredworkflow
 ```
 
 1. Run `aq mode cloud`. If the earlier parallel workflow was configured,
@@ -159,6 +159,12 @@ after completion, the timestamp and device/scene counts. Device refresh stays
 first, followed by workflow update, including when a new release is available.
 
 ## Multiple homes, accounts, and regions
+
+`aq account` puts the selected account first. Every entry uses its saved name
+as the title, with “Current account” or “Switch to this account” in the subtitle.
+An older unnamed connection uses its saved home label until renamed with
+`aq account rename`; without a home it shows “Aqara account.” Browsing the picker
+needs no credentials or network requests.
 
 `aq home` lists homes across saved accounts and regions, with account labels
 to distinguish them. Each connection remembers its selected home and catalogs.

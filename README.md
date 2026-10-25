@@ -31,9 +31,9 @@ devices from the selected mode; Cloud does not append the Agent inventory.
 These steps connect the default Agent mode. For Cloud, switch with `aq mode cloud`
 and follow [the Cloud setup guide](README-cloud.md#connect-cloud-mode).
 
-1. Download [Aqara-0.3.5.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.5/Aqara-0.3.5.alfredworkflow)
+1. Download [Aqara-0.3.6.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.6/Aqara-0.3.6.alfredworkflow)
    and open it to import into Alfred. To build from source, run
-   `python3 workflow-build` and open `dist/Aqara-0.3.5.alfredworkflow`.
+   `python3 workflow-build` and open `dist/Aqara-0.3.6.alfredworkflow`.
 2. Type `aq login` in Alfred and press Return. Sign in with your Aqara account.
 3. Copy the **aqara_api_key** shown on the page. Type `aq apikey` in Alfred and
    press Return to paste it into the secure dialog. It is saved in macOS Keychain.
@@ -67,7 +67,7 @@ connections remain available. Then use `aq mode cloud` and follow
 [the Cloud guide](README-cloud.md#connect-cloud-mode) if you want Cloud controls.
 For migration from the earlier parallel workflow, see
 [Cloud migration](README-cloud.md#upgrading-from-the-parallel-workflow).
-Changes and validation are in the [v0.3.5 release notes](docs/releases/v0.3.5.md).
+Changes and validation are in the [v0.3.6 release notes](docs/releases/v0.3.6.md).
 
 ## Commands
 
@@ -126,6 +126,12 @@ separately controllable devices. Cloud composite switches use their individual
 Aqara Home channel names when available; see [Cloud device names](README-cloud.md#device-and-channel-names).
 
 ## Multiple homes, accounts, and regions
+
+`aq account` shows each saved account name as its title. The selected account
+appears first with “Current account” in the subtitle; other entries say “Switch
+to this account.” Older unnamed connections use their saved home label until
+you name them with `aq account rename`. An unnamed connection without a home
+shows “Aqara account.” Account browsing reads only local settings.
 
 `aq home` lists every discovered home across all saved accounts. The current
 home is marked, and each result includes its account label. Select a home to
@@ -287,7 +293,7 @@ profile. The build uses an explicit file allowlist and excludes local data,
 tests, `.git`, and credentials. Both macOS's Python 3.9 and current Homebrew
 Python are supported.
 
-The v0.3.5 suite passes 189 offline tests on Python 3.9 and 3.14. Tests cover
+The v0.3.6 suite passes 196 offline tests on Python 3.9 and 3.14. Tests cover
 mode persistence, migration rollback, account/home isolation, stale selections,
 native capability checks, retained Agent controls, and verified update downloads.
 The offline suite does not send physical device commands.

@@ -429,9 +429,10 @@ class WorkflowTest(unittest.TestCase):
         self.profile_keys[target.profile_id].get.assert_not_called()
 
     def test_cancelling_a_rename_keeps_the_name(self):
+        previous_name = self.store.profile_name()
         with patch.object(command, "prompt_profile_name", return_value=None):
             result = command.execute({"action": "account_rename_prompt", "profile_id": "default"}, self.store)
-        self.assertEqual(self.store.profile_name(), "Current account")
+        self.assertEqual(self.store.profile_name(), previous_name)
         self.assertIn("cancelled", result)
 
     def test_api_keys_are_rejected_as_account_labels(self):
