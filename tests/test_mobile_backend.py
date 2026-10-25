@@ -56,6 +56,9 @@ class MobileBackendTest(unittest.TestCase):
         self.store.write("catalog", {"home_id": "example-home", "devices": [self.device], "scenes": []})
         self.mobile = Mock()
         self.mobile.matter_details.return_value = detail()
+        self.mobile.panels.return_value = []
+        self.mobile.traits.return_value = []
+        self.mobile.endpoint_capabilities.side_effect = lambda did: BackendClient.endpoint_capabilities(self.mobile, did)
         self.action = {"action": "control", "profile_id": "default", "home_id": "example-home",
                        "id": self.device["id"], "command": "unlock", "value": ""}
         self.updater = Mock()
@@ -180,6 +183,29 @@ class MobileBackendTest(unittest.TestCase):
         self.assertEqual(self.store.read("catalog"), original)
         self.assertEqual(self.store.read("settings")["home_id"], "example-home")
 
+    def test_panel_subject_key_merges_exact_endpoint_without_losing_agent_controls(self):
+        self.values["default"] = json.dumps({"agent_key": "example-key", "token": "example-token"})
+        agent = Mock()
+        agent.request.side_effect = [[{"positionId": "example-home", "positionName": "Example Home"}],
+                                    [{"endpoint_id": "example-subject", "device_name": "Desk Light", "device_type": "DimmableLight"}], []]
+        self.mobile.catalog.side_effect = [[{"homeId": "example-home", "homeName": "Example Home"}],
+                                          [{"did": "example-native-device", "deviceName": "Desk Light"}], []]
+        self.mobile.matter_details.side_effect = MobileAPIError("not Matter", 7167)
+        self.mobile.panels.return_value = [{"subjects": [{"deviceId": "example-native-device", "endpointId": 2,
+             "subjectKey": "example-subject", "paths": ["2.132.32920"]}]}]
+        self.mobile.traits.return_value = [{"deviceId": "example-native-device", "traits": [{"path": "2.132.32920", "value": "1"}]}]
+        with patch.object(self.store, "client", return_value=agent), patch.object(self.store, "mobile_client", return_value=self.mobile):
+            self.store.refresh()
+        devices = self.store.read("catalog")["devices"]
+        self.assertEqual(len(devices), 1)
+        device = devices[0]
+        self.assertEqual(device["id"], "example-subject")
+        self.assertEqual(device["did"], "example-native-device")
+        self.assertEqual(set(controls(device)), {"status", "on", "off", "dim", "color", "ct"})
+        with patch.object(self.store, "mobile_client", return_value=self.mobile):
+            items = build_items("Desk Light status", self.store, self.updater)
+        self.assertEqual(items[0]["subtitle"], "Power: On")
+
     def test_reconnection_failure_keeps_credentials_and_current_catalog(self):
         self.values["default"] = json.dumps({"agent_key": "old-example-key"})
         old = self.store.read("catalog")
@@ -278,7 +304,8 @@ class MobileTransportAndPackageTest(unittest.TestCase):
                 self.assertIn("mobile_backend.py", archive.namelist())
                 self.assertIn("runtime.py", archive.namelist())
                 self.assertFalse(any(name.startswith(("tools/", ".cache/", "tests/")) or name.endswith(".json") for name in archive.namelist()))
-                self.assertEqual(len(archive.namelist()), 22)
+                self.assertIn("cloud_capabilities.py", archive.namelist())
+                self.assertEqual(len(archive.namelist()), 23)
         self.assertEqual((root / "info.plist").read_bytes(), original)
 
     def test_update_channels_cannot_cross_install_variants(self):

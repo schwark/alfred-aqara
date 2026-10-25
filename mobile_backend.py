@@ -1,6 +1,7 @@
 """Experimental mobile connection, with explicit Agent fallback for feature parity.
 
-Device writes use only the common, capability-advertised Matter lock commands. Unknown native controls remain read-only. No model-name dispatch,
+Device writes use common, capability-advertised traits and Matter lock commands.
+Unknown native controls remain read-only. No model-name dispatch,
 automatic write retry, legacy pairing-key extraction, or guessed resource writes.
 """
 
@@ -13,6 +14,8 @@ import subprocess
 import time
 
 from common import AqaraError, Client, Store, control_body, controls, normalize
+from cloud_capabilities import (compile_traits, objects, panel_endpoints, trait_rows,
+                                trait_status, validate_control)
 from keychain import Keychain
 from mobile_transport import ALLOWED, AppIdentity, MobileAPIError, MobileClient
 
@@ -21,6 +24,7 @@ BUNDLE = "com.schwark.aqara.mobile"
 SCENES = "/app/position/scene/query"
 MATTER_WRITE = "/matter/write"
 SCENE_RUN = "/ifttt/scene/run"
+TRAIT_WRITE = "/app/qlink/trait/write"
 
 
 def identity_key():
@@ -63,7 +67,7 @@ def page_rows(value, kind):
 
 
 class BackendClient(MobileClient):
-    routes = ALLOWED | {("GET", SCENES), ("POST", MATTER_WRITE), ("POST", SCENE_RUN)}
+    routes = ALLOWED | {("GET", SCENES), ("POST", MATTER_WRITE), ("POST", SCENE_RUN), ("POST", TRAIT_WRITE)}
 
     def catalog(self, kind, home_id=""):
         result, seen = [], set()
@@ -97,6 +101,48 @@ class BackendClient(MobileClient):
             "pwd": hashlib.md5(password.encode("utf-8")).hexdigest() if password else "",
             "data": {path: ""}, "type": 0})
 
+    def write_trait(self, did, spec, value=""):
+        # Restrict this writer to supported semantic controls. In particular it
+        # cannot write DoorLock traits or an arbitrary path from an action JSON.
+        suffix = {"power": "132.32920", "brightness": "133.32923", "mired": "134.32927"}.get(spec.get("kind"))
+        path = spec.get("path", "")
+        if not suffix or not re.fullmatch(r"\d+\." + re.escape(suffix), path):
+            raise AqaraError("This native control is not implemented.")
+        wire_value = validate_control(spec, value)
+        return self._call("POST", TRAIT_WRITE, {"deviceId": did, "traits": [{"path": path, "value": wire_value}]})
+
+    def endpoint_capabilities(self, did):
+        """Read both shared schemas; one unavailable schema does not erase the other."""
+        panels, matter, failures = [], [], 0
+        try:
+            panels = panel_endpoints(self.panels(did), did)
+        except MobileAPIError:
+            failures += 1
+        try:
+            matter = capabilities(self.matter_details(did), did)
+        except MobileAPIError:
+            failures += 1
+        by_ep = {c["endpoint"]: dict(c) for c in matter}
+        for panel in panels:
+            entry = by_ep.setdefault(panel["endpoint"], {"endpoint": panel["endpoint"], "commands": {}, "readings": {}})
+            entry.update(panel)
+            # The app prioritizes authenticated remote control over the simple
+            # command path. Presence of that trait must not be bypassed.
+            if any(path.endswith(".148.40000") for path in panel["paths"]):
+                entry["commands"] = {}
+                entry["requires_auth"] = True
+        paths = sorted({p for panel in panels for p in panel["paths"]})
+        traits = {}
+        for start in range(0, len(paths), 300):
+            page = paths[start:start + 300]
+            try:
+                traits.update(trait_rows(self.traits(did, page), did, page))
+            except MobileAPIError:
+                failures += 1
+        for entry in by_ep.values():
+            entry["cloud_controls"], entry["trait_readings"] = compile_traits(entry, traits)
+        return list(by_ep.values()), failures
+
 
 def capabilities(payload, did):
     """Bind commands to this device's endpoints, never the global command list."""
@@ -106,14 +152,12 @@ def capabilities(payload, did):
     matches = [d for d in payload["devices"] if isinstance(d, dict) and str(d.get("did", "")) == did]
     if len(matches) != 1:
         return result
-    def objects(value):
-        return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
     for device in matches:
         for endpoint in objects(device.get("eps")):
             if not isinstance(endpoint, dict) or not re.fullmatch(r"\d+", str(endpoint.get("id", ""))):
                 continue
             ep = str(endpoint["id"])
-            commands, readings = {}, {}
+            commands, readings, requires_auth = {}, {}, False
             for function in objects(endpoint.get("funcs")):
                 if str(function.get("id")) != "148":
                     continue
@@ -125,6 +169,10 @@ def capabilities(payload, did):
                     name = {"32970": "Lock", "32971": "Door"}.get(str(trait.get("id")))
                     if name:
                         readings[ep + ".148." + str(trait["id"]) + ".1"] = name
+                if any(str(t.get("id")) == "40000" for t in objects(function.get("traits"))):
+                    requires_auth = True
+            if requires_auth:
+                commands = {}
             if commands or readings:
                 result.append({"endpoint": ep, "commands": commands, "readings": readings})
     return result
@@ -260,25 +308,33 @@ class MobileStore(Store):
                 did = str(row["did"])
                 # Query common capabilities for every device. No model whitelist.
                 try:
-                    caps = capabilities(mobile.matter_details(did), did)
+                    caps, failures = mobile.endpoint_capabilities(did)
+                    native_failures += bool(failures)
                 except MobileAPIError:
                     caps = []
                     native_failures += 1
                 endpoints = caps or [{"endpoint": "", "commands": {}, "readings": {}}]
                 for cap in endpoints:
-                    name = str(row.get("deviceName") or row.get("originalName") or "Device")
-                    if len(endpoints) > 1:
+                    name = str(cap.get("name") or row.get("deviceName") or row.get("originalName") or "Device")
+                    if len(endpoints) > 1 and not cap.get("name"):
                         name += " · Endpoint " + cap["endpoint"]
                     device = {"id": "mobile:" + did + ("#" + cap["endpoint"] if cap["endpoint"] else ""),
                               "did": did, "endpoint": cap["endpoint"], "name": name, "device_name": name,
                               "room": str(row.get("positionName") or ""), "kind": "device", "backend": "mobile",
-                              "type": "DoorLock" if caps or ".lock." in str(row.get("model", "")).casefold() else str(row.get("model") or "Device"),
+                              "type": cap.get("type") or ("DoorLock" if cap["commands"] or cap["readings"] or any(".148." in p for p in cap.get("paths", [])) else str(row.get("model") or "Device")),
                               "mobile_commands": cap["commands"], "mobile_readings": cap["readings"],
-                              "lock_note": "No shared lock command advertised; legacy pairing control is not implemented"}
+                              "cloud_controls": cap.get("cloud_controls", {}), "trait_readings": cap.get("trait_readings", {}),
+                              "lock_note": "This endpoint needs an authenticated lock-control route; it has not been validated yet"}
                     # Merge only an exact identifier; never associate a write by name.
-                    existing = next((d for d in devices if d["id"] == did), None)
-                    if existing and caps and len(endpoints) == 1:
+                    subject_key = cap.get("subject_key")
+                    unique_subject = subject_key and sum(c.get("subject_key") == subject_key for c in endpoints) == 1
+                    matches = [d for d in devices if d.get("backend") != "mobile" and
+                               ((unique_subject and d["id"] == subject_key) or (len(endpoints) == 1 and d["id"] == did))]
+                    existing = matches[0] if len(matches) == 1 else None
+                    if existing and caps:
+                        fallback = {"id": existing["id"], "type": existing["type"]}
                         existing.update({k: v for k, v in device.items() if k not in ("id", "name", "room", "device_name")})
+                        existing["agent_fallback"] = fallback
                     else:
                         if any(d["name"].casefold() == name.casefold() for d in devices):
                             device["name"] += " (Mobile)"
@@ -316,7 +372,13 @@ class MobileStore(Store):
             return entry["data"]
         mobile = client or self.mobile_client()
         paths = device.get("mobile_readings", {})
-        data = readings(mobile.matter_status(device["did"], paths) if paths else mobile.status(device["did"]), paths)
+        trait_paths = device.get("trait_readings", {})
+        if trait_paths:
+            data = trait_status(mobile.traits(device["did"], trait_paths), device["did"], trait_paths)
+        elif not paths and device.get("agent_fallback"):
+            return super().status(device["agent_fallback"], client=None)
+        else:
+            data = readings(mobile.matter_status(device["did"], paths) if paths else mobile.status(device["did"]), paths)
         cache[key] = {"updated": time.time(), "data": data}
         self.write("status", cache)
         return data
@@ -332,11 +394,27 @@ class MobileStore(Store):
         if device.get("backend") != "mobile":
             return super().control(device, command, value)
         body = control_body(device, command, value)
+        if command not in device.get("mobile_commands", {}) and body.get("attribute") != "native_trait":
+            fallback = device.get("agent_fallback")
+            if fallback:
+                return super().control(fallback, command, value)
+            raise AqaraError("This device does not support that native command.")
         scope = self.read("settings").get("home_id")
         mobile = self.mobile_client()
         # Re-read capabilities at execution, including exact endpoint, before any write.
-        fresh = next((c for c in capabilities(mobile.matter_details(device["did"]), device["did"])
+        fresh = next((c for c in mobile.endpoint_capabilities(device["did"])[0]
                       if c["endpoint"] == device.get("endpoint")), {})
+        if body.get("attribute") == "native_trait":
+            spec = fresh.get("cloud_controls", {}).get(command)
+            if not spec or spec != device.get("cloud_controls", {}).get(command):
+                raise AqaraError("This device's capabilities changed. Run aqm update before trying again.")
+            if self.active_profile_id() != self.profile_id or self.read("settings").get("home_id") != scope:
+                raise AqaraError("The selected home changed. Select the device again.")
+            try:
+                mobile.write_trait(device["did"], spec, value)
+            finally:
+                (self.directory / "status.json").unlink(missing_ok=True)
+            return body
         path = fresh.get("commands", {}).get(command)
         if not path or path != device.get("mobile_commands", {}).get(command):
             raise AqaraError("This lock's capabilities changed. Run aqm update before trying again.")
@@ -469,10 +547,12 @@ class MobileStore(Store):
             devices = catalog.get("devices", [])
             native = [d for d in devices if d.get("backend") == "mobile"]
             locks = [d for d in native if any(c in controls(d) for c in ("lock", "unlock"))]
-            fallback = [d for d in devices if d.get("backend") != "mobile"]
+            fallback = [d for d in devices if d.get("backend") != "mobile" or d.get("agent_fallback")]
+            native_controls = [d for d in native if d.get("cloud_controls")]
             return [item("Mobile command coverage", "%s endpoints advertise lock commands · Execution remains unverified until you test" % len(locks)),
                     item("Agent fallback", "%s endpoints retain their existing commands and scenes" % len(fallback)),
-                    item("Native coverage gaps", "Other mobile devices currently have status only; legacy encrypted locks need pairing support"),
+                    item("Native device controls", "%s endpoints advertise common power, brightness, or color-temperature traits" % len(native_controls)),
+                    item("Native coverage gaps", "Unsupported controls retain Agent fallback where matched; authenticated lock routes remain under investigation"),
                     item("Native scenes", "%s discovered · Native scenes use the app API; existing Agent scenes retain their route" % catalog.get("native_scene_count", 0)),
                     item("Capability reads unavailable", "%s devices · No control capability was guessed" % catalog.get("native_capability_failures", 0))]
         extra = [("import", "Import current Agent profiles", "Copy accounts and cached catalogs; keep the aq workflow separate", "mobile_import"),

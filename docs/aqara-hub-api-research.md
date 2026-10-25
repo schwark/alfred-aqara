@@ -215,6 +215,24 @@ discovery records are excluded from the workflow and repository.
 
 ## Next cloud validation
 
+The experimental runtime now uses the shared collection-panel and trait-read
+routes for endpoint discovery, alongside Matter details. It binds a response
+to the requested device and exact endpoint. A unique returned `subjectKey`
+can associate a native endpoint with an Agent endpoint; names cannot.
+Matched endpoints retain the full Agent command set. Common native power,
+brightness, and color-temperature writes use `/app/qlink/trait/write`, with
+fresh capability checks and no retry through another transport. Unknown
+traits are not written. Authenticated lock-control traits take priority over
+plain Matter commands, matching the recovered app's route selection.
+
+`tools/cloud_probe.py --devices` gathers private read-only evidence from all
+connected regional accounts and homes. It includes parent-device metadata,
+panels, trait parameters, Matter details, and the global specification. It
+does not send scene runs, lock commands, or trait writes. Evidence is confined
+to the private Aqara cache with mode `0600`; the tool and evidence are excluded
+from workflow packages. Offline tests establish parsing and request behavior;
+they do not establish successful physical hub execution.
+
 1. Authenticate the owning account against its correct regional cloud.
 2. Read device panels, traits, and available command definitions, including
    parent-hub associations, without assuming Zigbee devices have Matter details.

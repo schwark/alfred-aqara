@@ -4,11 +4,12 @@ This branch builds a separate Alfred workflow named **Aqara Mobile
 (Experimental)** with keyword **`aqm`**. The existing `aq` workflow remains
 installed with its own accounts, data, credentials, and stable update channel.
 
-The experiment combines the mobile app's common lock-command API with an
+The experiment combines the mobile app's shared cloud trait/command APIs with an
 explicit Agent fallback. Importing the existing Agent profiles preserves their
 device commands, scenes, home switching, status subtitles, autocomplete, and
 notifications. Native mobile discovery adds devices and capability-advertised
-lock/unlock commands. **This is not yet a complete mobile-only replacement.**
+lock/unlock commands, plus advertised power, brightness, and color-temperature
+traits. **This is not yet a complete mobile-only replacement.**
 
 ## Build and connect
 
@@ -50,26 +51,33 @@ Frida, mitmproxy, APKs, and the research tools are not runtime dependencies.
 | --- | --- |
 | Accounts, regions, multiple homes, rename, rollback | Shared profile/home implementation; isolated data and Keychain service |
 | Search, status subtitle, duplicate names, Tab completion | Shared Alfred interface |
-| Lights, switches, curtains, AC controls | Existing Agent routes retained after import |
+| Lights, switches, curtains, AC controls | Existing Agent routes retained after import; matched endpoints may use common native power, brightness, and color-temperature traits |
 | Existing scenes | Existing Agent route retained |
 | Additional mobile scenes | App scene list and execution route; construction verified in app code, live execution unverified |
 | Mobile lock/unlock | Per-device DoorLock command metadata plus common `/matter/write` request |
-| Other mobile-only devices | Named-resource status; native controls not implemented yet |
+| Other mobile-only devices | Known trait status, power, brightness, and color temperature where advertised; unknown capabilities remain read-only |
 | Workflow updates | Same verified updater, isolated to `Aqara-Mobile-*` assets; mobile prereleases enabled |
 
 Homes are associated across APIs only by an exact home ID. Devices are
-associated only by an exact device ID. Similar names are never used to route
+associated only by an exact device ID or a unique returned endpoint `subjectKey`
+matching the Agent endpoint ID. Similar names are never used to route
 a write. Unmatched mobile devices remain separate entries; a matching display
 name gets a `(Mobile)` suffix. If the APIs expose different IDs, select the
 mobile home/device explicitly. Multi-endpoint locks receive separate entries.
+Matched endpoints retain their original Agent commands, including color,
+curtain, and climate controls. A value outside the native device's range may
+use the existing Agent route when supported; this choice happens before a
+write. A failed native operation never triggers an Agent retry.
 
 ## Hub-first investigation
 
-The next transport target is the M3 itself. The current lock-plugin paths do
+The primary transport target is **Alfred → Aqara cloud → M3 → device**. The
+current lock-plugin paths do
 not establish that hub control requires phone-to-lock pairing. See the
 [M3 hub research](https://github.com/schwark/alfred-aqara/blob/codex/aqara-mobile-api/docs/aqara-hub-api-research.md).
-The installed experiment currently retains the Agent baseline while this hub
-transport is validated; it does not yet implement LANLink control.
+The experiment reads endpoint panels and traits for Zigbee/hub devices as well
+as Matter metadata. Its native writer uses the regional cloud endpoints;
+LANLink control is not a dependency. Actual hub execution remains to be tested.
 
 ## Lock behavior and limitations
 
@@ -84,6 +92,9 @@ Only `35010` (lock) and `35011` (unlock) are supported. The workflow discovers
 the endpoint and supported commands from **that device's** `/matter/dev/detail`
 response, and checks them again at execution. It does not infer capabilities
 from a model name, another lock, or the global specification.
+If either returned endpoint schema advertises `RemoteControlWithAuthCode`,
+plain lock commands are withheld: the app prioritizes the authenticated route,
+and that route has not been validated by this workflow.
 
 Selecting a lock action requests the device's separate remote-control password
 in a hidden dialog. Leave it empty if no password is configured. A nonempty
@@ -102,6 +113,17 @@ the experiment rather than a claim made by this build.
 
 Browsing, refresh, import, and parity inspection never issue device writes.
 Lock commands and scene runs occur only after selecting their Alfred actions.
+
+## Read-only cloud evidence
+
+After connecting accounts, run `python3 tools/cloud_probe.py --devices` from
+the research checkout to read all homes, device panels, traits, extended
+metadata, and the shared specification. It uses the saved Keychain sessions
+and has no device-write path. Its console output contains only counts and
+safe error codes. Detailed evidence stays in the private file
+`~/.cache/alfred-aqara/cloud-evidence.json` with mode `0600`; it is excluded
+from source and workflow packages. Without mobile sessions, it reports
+`sign_in_required` instead of trying credentials or logging private data.
 
 ## Data and updates
 

@@ -37,10 +37,11 @@ MATTER_DETAIL = "/matter/dev/detail"
 MATTER_RESOURCES = "/res/query/by/resourceId"
 TRAIT_READ = "/app/qlink/trait/read"
 PANELS = "/app/layout/collection/panels"
+SPEC = "/app/aqara/spec/config"
 ALLOWED = {("POST", LOGIN), ("GET", HOMES), ("GET", DEVICES),
            ("GET", DETAIL), ("POST", RESOURCES), ("GET", PLUGINS),
            ("GET", MATTER_DETAIL), ("POST", MATTER_RESOURCES),
-           ("POST", TRAIT_READ), ("GET", PANELS)}
+           ("POST", TRAIT_READ), ("GET", PANELS), ("GET", SPEC)}
 MAX_RESPONSE = 4 * 1024 * 1024
 
 
@@ -205,6 +206,10 @@ class MobileClient:
     def panels(self, device_id):
         """Read endpoint paths for Zigbee and hub devices without assuming Matter."""
         return self._call("GET", PANELS, {"subjectIds": device_id, "types": "device_endpoint_panel"})
+
+    def specification(self):
+        """Global semantics are reference data, never proof of device support."""
+        return self._call("GET", SPEC, {})
 
     def traits(self, device_id, paths):
         paths = list(paths)

@@ -34,7 +34,7 @@ def build(destination=None, mobile=False):
                 obj["config"]["title"] = "Aqara Mobile"
             if obj["type"] == "alfred.workflow.output.notification":
                 obj["config"]["title"] = "Aqara Mobile"
-        files += ("mobile_transport.py", "mobile_backend.py")
+        files += ("mobile_transport.py", "mobile_backend.py", "cloud_capabilities.py")
     prefix = "Aqara-Mobile-" if mobile else "Aqara-"
     output = Path(destination) if destination else ROOT / "dist" / (prefix + version + ".alfredworkflow")
     output.parent.mkdir(parents=True, exist_ok=True)

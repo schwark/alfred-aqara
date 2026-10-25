@@ -1063,3 +1063,62 @@ Agent refreshes verified that imported profiles retained the previous device
 command sets and scenes. No lock or scene
 was actuated as part of this validation. Do not treat passing fixture tests as
 physical execution evidence.
+
+## Shared cloud endpoint implementation
+
+The experiment now queries both collection panels and Matter details instead
+of requiring every device to support `/matter/dev/detail`. Panel subjects
+contain `deviceId`, `endpointId`, `subjectKey`, `paths`, endpoint names, and
+device types. Only rows for the requested device and paths on that exact
+endpoint are retained. Duplicate endpoints or conflicting trait responses
+abort the refresh. A unique returned `subjectKey` can match an Agent endpoint
+ID exactly; display names never establish that association.
+
+The additional global read is GET `/app/v1.0/lumi/app/aqara/spec/config`.
+Its app-code definition is verified. An application-only signed request
+without an account session was rejected with code `109`; an authenticated
+response remains to be captured. Global semantic definitions never enable
+a device capability on their own.
+
+The common native controls currently compiled from returned device paths and
+trait metadata are:
+
+| Function / trait | Alfred command | Wire value |
+| --- | --- | --- |
+| Output `132` / OnOff `32920` | `on`, `off` | String `1`, `0` |
+| LevelControl `133` / CurrentLevel `32923` | `dim` | Integer percentage within the device range |
+| ColorControl `134` / ColorTemperature `32927` | `ct` | Kelvin converted to mireds, within returned device bounds |
+
+These are shared protocol semantics, with no per-model dispatch. Color
+temperature is defined in mireds by the
+[Aqara data model](https://docs.aqara.com/docs/aqara-developer/aqara-data-model-specification/aqara-data-model-tags/).
+The recovered `OutPutFunc`, `LevelControlFunc`, and `ColorControlFunc` use the
+corresponding traits and the common repository. Native writes use the app's
+POST `/app/qlink/trait/write` body `{deviceId,traits:[{path,value}]}`. This
+writer cannot send arbitrary paths or DoorLock traits. Capabilities are read
+again immediately before execution. Native failures never trigger a write
+through a different API.
+
+An exact Agent/native match preserves the Agent command set for that
+endpoint. Unsupported native color, curtain, climate, and other commands keep
+their existing Agent route. Values outside native limits may also use the
+existing compatible Agent route, selected before any write. Known native
+status fields are formatted as subtitle text; metadata and arbitrary JSON
+values are omitted.
+
+The authenticated lock-control trait `40000` takes priority over plain Matter
+commands in the recovered app. The experiment therefore withholds plain
+lock/unlock when either returned schema advertises that trait. The presence
+of `RemoteUnlock` alone is not treated as proof that authenticated control can
+be skipped. U100 hub execution and both locks' physical operations remain
+unverified.
+
+`tools/cloud_probe.py --devices` reads all saved mobile accounts and homes,
+global definitions, inventories, panels, traits, and extended metadata. It
+does not accept passwords on the command line, execute scenes, or write to
+devices. Its detailed evidence is restricted to the private Aqara cache with
+mode `0600`; stdout contains counts and safe error codes. Session fields are
+removed from saved responses. This research tool is excluded from workflow
+packages. Offline regression tests cover binding, unit conversion, range
+validation, authenticated-route priority, no retry after failure, endpoint
+merging, retained Agent functionality, and private evidence handling.

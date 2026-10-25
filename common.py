@@ -402,7 +402,10 @@ def selector(device):
 def controls(device):
     """Map API device families to the official Aqara control action table."""
     if device.get("backend") == "mobile":
-        commands = {"status": (None, None, None)}
+        from cloud_capabilities import control_hint
+        commands = controls(device["agent_fallback"]) if device.get("agent_fallback") else {"status": (None, None, None)}
+        for command, spec in device.get("cloud_controls", {}).items():
+            commands[command] = ("native_trait", command, commands[command][2] if command in commands else control_hint(spec))
         for command in ("lock", "unlock"):
             if command in device.get("mobile_commands", {}):
                 commands[command] = ("lock_state", command, None)
@@ -431,6 +434,17 @@ def control_body(device, command, value=""):
     if command not in available or command == "status":
         raise AqaraError("This device does not support that command.")
     attribute, action, fixed = available[command]
+    if device.get("backend") == "mobile" and command in device.get("cloud_controls", {}):
+        from cloud_capabilities import validate_control
+        try:
+            wire_value = validate_control(device["cloud_controls"][command], value)
+        except AqaraError:
+            # Select a compatible transport before sending anything. Never
+            # retry a failed native write through Agent.
+            if device.get("agent_fallback") and command in controls(device["agent_fallback"]):
+                return control_body(device["agent_fallback"], command, value)
+            raise
+        return {"device_ids": [device["id"]], "attribute": attribute, "action": action, "value": wire_value}
     if command in ("dim", "ct", "slevel", "temp"):
         bounds = {"dim": (1, 100), "ct": (2700, 6500), "slevel": (0, 100), "temp": (18, 30)}
         low, high = bounds[command]
