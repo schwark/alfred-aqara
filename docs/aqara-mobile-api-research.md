@@ -1029,7 +1029,7 @@ research documentation and tools only.
 ## Parallel workflow experiment
 
 The branch now contains a separately packaged `aqm` implementation. Its guide
-is [mobile-workflow.md](mobile-workflow.md). The stable Agent workflow remains
+is [README-mobile.md](../README-mobile.md). The stable Agent workflow remains
 separate. `mobile_transport.py` shares the signed transport with the read-only
 probe; `mobile_backend.py` adds a small explicit write allowlist. The research
 probe itself still refuses device writes.

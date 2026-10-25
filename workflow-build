@@ -24,7 +24,7 @@ def build(destination=None, mobile=False):
         version = (ROOT / "mobile-version").read_text().strip()
         info.update(bundleid="com.schwark.aqara.mobile", name="Aqara Mobile (Experimental)", version=version,
                     description="Parallel mobile API connection with Agent fallback",
-                    readme=(ROOT / "docs/mobile-workflow.md").read_text())
+                    readme=(ROOT / "README-mobile.md").read_text())
         info["variables"].update(keyword="aqm", AQARA_BACKEND="mobile")
         for config in info["userconfigurationconfig"]:
             if config["variable"] == "keyword":
@@ -45,7 +45,7 @@ def build(destination=None, mobile=False):
             entry.external_attr = (0o100755 if filename == "workflow.sh" else 0o100644) << 16
             content = (plistlib.dumps(info) if filename == "info.plist" else
                        (version + "\n").encode() if filename == "version" else
-                       (ROOT / "docs/mobile-workflow.md").read_bytes() if mobile and filename == "README.md" else
+                       (ROOT / "README-mobile.md").read_bytes() if mobile and filename == "README.md" else
                        (ROOT / filename).read_bytes())
             archive.writestr(entry, content)
     return output

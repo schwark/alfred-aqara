@@ -10,6 +10,9 @@ the hub's IP address and a Home Assistant installation are not required.
 Availability depends on the devices and account region exposed by Aqara Agent.
 This is not a direct LAN or Matter controller.
 
+For the parallel mobile/cloud mode, including supported lock/unlock commands,
+see [README-mobile.md](README-mobile.md).
+
 ## Requirements
 
 - macOS with Alfred 5 and a Powerpack license.
@@ -191,7 +194,7 @@ Errors appear in Alfred's workflow debugger as well as its notifications.
 
 The `codex/aqara-mobile-api` branch also builds a separate `aqm` workflow with
 mobile capability discovery and experimental lock commands, while retaining
-Agent controls as a fallback. See [the mobile workflow guide](docs/mobile-workflow.md)
+Agent controls as a fallback. See [the mobile mode README](README-mobile.md)
 and [API research notes](docs/aqara-mobile-api-research.md). Mobile-only feature
 parity still uses Agent fallback; cloud unlock followed by lock has been
 verified with U100 and U300 through the shared API. The experiment has its own
