@@ -2,15 +2,74 @@
 
 ## Objective and correction
 
-The target is **Alfred → M3 hub → devices**, with discovery and commands shared
-across device families. Direct phone-to-lock Bluetooth enrollment is not the
-assumed integration architecture.
+The primary target is **Alfred → Aqara regional cloud → M3 hub → devices**,
+with discovery and commands shared across device families and remote homes.
+LANLink is an optional local transport. Neither same-LAN access nor direct
+phone-to-lock Bluetooth enrollment is assumed to be a prerequisite for the
+cloud integration.
 
 The U100's encrypted app-plugin branch establishes requirements for that
 branch. It does **not** establish that every hub-level API needs the phone's
 lock-pairing key. Likewise, a failed `/matter/dev/detail` call against a Zigbee
 lock does not rule out hub LAN control or the hub's Matter bridge. The previous
 mobile experiment implemented only part of the available control surface.
+
+## Cloud control is a separate path
+
+The current public [AIOT API guide](https://docs.aqara.com/docs/aqara-developer/aiot-api/getting-started-with-the-aiot-api/)
+documents regional HTTPS bases under `{host}/v4.0/open/api`, with developer
+application signing credentials (`Appid`, `Keyid`, signature) and account
+authorization via `Accesstoken`. These are a separate credential family from
+the Agent API key and the mobile account session.
+
+Relevant documented operations are:
+
+- GET `/devices/definitions` for per-device capabilities.
+- POST `/devices/trait/execute` for trait-based controls.
+- POST `/devices/command/execute` for commands discovered in device definitions.
+
+The [command API](https://docs.aqara.com/docs/aqara-developer/aiot-api/execute-device-command/)
+requires endpoint/function/command fields from device definitions and can
+report failed items even when the top-level request succeeds. Generic cloud
+control availability does not guarantee U100 lock/unlock authorization.
+
+The recovered app independently has a cloud implementation:
+
+```text
+DeviceControlFactory strategies
+  → LANDeviceControl
+  → AqaraDeviceControl
+      → DeviceCardDataNetRepository
+          → CardDataApi (regional cloud HTTPS)
+```
+
+The strategy list also includes a local database implementation. Some factory
+methods were not fully decompiled, so the list is not proof of every fallback
+or retry behavior. `AqaraDeviceControl.write` and `cmd` do call the network
+repository, and `CardDataApi` declares these cloud routes under `/app/v1.0/lumi`:
+
+| Operation | Method/path | App-built body |
+| --- | --- | --- |
+| Read traits | POST `/app/qlink/trait/read` | `devices`, `needParam` |
+| Write one device's traits | POST `/app/qlink/trait/write` | `deviceId`, `traits:[{path,value}]` |
+| Write traits in a batch | POST `/app/qlink/batch/trait/write` | `devices:[{deviceId,traits}]` |
+| Execute device commands | POST `/matter/write` | `did`, `data:{path:value}` |
+| Execute commands in a batch | POST `/matter/write/batch` | `list:[{did,data}]` |
+
+`DeviceCardDataNetRepository` confirms the generic request construction. The
+cloud target is a device ID; neither the M3's LAN address nor a LANLink tunnel
+appears in those requests. Exact routing and lock authorization remain server
+responsibilities to validate. This is not a demonstrated cloud tunnel for
+arbitrary LANLink messages. A separate `/dev/rpc` string in a legacy gateway
+API class remains only a lead; M3 compatibility and request semantics were not
+established.
+
+For this workflow, cloud capability discovery and hub-executed operations take
+priority. The U100's inspected `RemoteControlWithAuthCode` branch can still
+require phone-held material even when delivered through the cloud. We must
+determine whether the owning hub exposes another authorized operation; cloud
+relay by itself does not prove that requirement disappears. No lock command
+was sent during this investigation.
 
 ## Independent evidence
 
@@ -154,7 +213,20 @@ with `--reference <separately-cloned-Aqara-LANLink-directory>`. Add
 Raw reference code, proprietary native libraries, captures, and private
 discovery records are excluded from the workflow and repository.
 
-## Next validation
+## Next cloud validation
+
+1. Authenticate the owning account against its correct regional cloud.
+2. Read device panels, traits, and available command definitions, including
+   parent-hub associations, without assuming Zigbee devices have Matter details.
+3. Establish which U100 operation can be executed by its owning M3 and what
+   permissions or authorization it requires.
+4. Test one selected operation with explicit physical-test authorization and
+   verify actual state. Preserve the existing Agent functionality throughout.
+
+Public developer API coverage and mobile private API coverage must be tested
+separately; their credentials and permissions are not interchangeable.
+
+## Optional LAN validation
 
 1. Resolve a reachable M3 advertisement with Hub Cluster/LAN Control enabled.
 2. Establish the encrypted hub session and authenticate the owning account.
