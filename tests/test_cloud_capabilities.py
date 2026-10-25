@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from cloud_capabilities import compile_traits, panel_endpoints, trait_rows, trait_status, validate_control
 from common import AqaraError, control_body, controls
 from mobile_backend import BackendClient, MobileStore, TRAIT_WRITE, capabilities
-from mobile_transport import AppIdentity, MobileAPIError
+from mobile_transport import AppIdentity, MobileAPIError, MobileClient
 from tools.cloud_probe import inspect_device, inspect_profile, save_evidence
 
 
@@ -147,6 +147,40 @@ class CloudCapabilityTest(unittest.TestCase):
             self.assertNotIn("private-token", destination.read_text())
             with self.assertRaises(AqaraError):
                 save_evidence(Path(__file__).resolve().parents[1] / "forbidden-evidence.json", result)
+
+    def test_bridge_queries_do_not_allow_bind_unbind_or_device_writes(self):
+        client = MobileClient(self.client().identity, "US", "US")
+        with patch.object(client, "_call") as call:
+            client.gateway_details("example-hub")
+            client.bridge_gateways("example-device", "example-home")
+            client.bridge_devices("example-home", "example-hub")
+        self.assertEqual([(c.args[0], c.args[1], c.args[2]) for c in call.call_args_list], [
+            ("GET", "/dev/query/gateway/detail", {"deviceId": "example-hub"}),
+            ("POST", "/app/dev/matter/bridge", {"deviceId": "example-device", "positionId": "example-home"}),
+            ("POST", "/app/dev/matter/bridge/subdevice", {"positionId": "example-home", "gatewayId": "example-hub"})])
+        for path in ("/app/dev/matter/bridge/subdevice/bind", "/app/dev/matter/bridge/unbind/by-device", "/matter/write"):
+            with self.assertRaises(MobileAPIError):
+                client._call("POST", path, {})
+
+    def test_bridge_evidence_follows_returned_gateway_relationships_only(self):
+        store, client = Mock(), Mock()
+        store.secrets.return_value = {"token": "example-token"}
+        store.profile_id = "example-profile"
+        store.mobile_client.return_value = client
+        client.catalog.side_effect = [[{"homeId": "example-home"}], [{"did": "example-device", "parentDeviceId": "example-hub"}]]
+        client.specification.return_value = {}
+        client.panels.return_value = []
+        client.details.return_value = {}
+        client.matter_details.return_value = {}
+        client.bridge_gateways.return_value = [{"deviceId": "example-hub"}]
+        client.gateway_details.return_value = {}
+        client.bridge_devices.return_value = []
+        evidence, summary = inspect_profile(store, True, True)
+        self.assertEqual(summary, {"status": "queried", "homes": 1, "devices": 1})
+        self.assertEqual(evidence["homes"][0]["gateways"][0]["device_id"], "example-hub")
+        client.bridge_gateways.assert_called_once_with("example-device", "example-home")
+        client.bridge_devices.assert_called_once_with("example-home", "example-hub")
+        self.assertTrue({c[0] for c in client.mock_calls}.issubset({"catalog", "specification", "panels", "details", "matter_details", "bridge_gateways", "gateway_details", "bridge_devices"}))
 
 
 if __name__ == "__main__":

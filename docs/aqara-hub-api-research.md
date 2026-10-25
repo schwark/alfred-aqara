@@ -244,6 +244,32 @@ they do not establish successful physical hub execution.
 Public developer API coverage and mobile private API coverage must be tested
 separately; their credentials and permissions are not interchangeable.
 
+### Cloud bridge discovery
+
+Recovered `IDeviceHttpApi` and `DeviceHttpModel` also expose these read-only
+queries. Request field names were checked with constant replacement disabled
+in the decompiler, and the two bridge POSTs call query methods rather than
+the adjacent bind/unbind methods:
+
+| Query | Method / path below `/app/v1.0/lumi` | Fields |
+| --- | --- | --- |
+| Gateway detail | GET `/dev/query/gateway/detail` | Query `deviceId` |
+| Gateways eligible to bridge a device | POST `/app/dev/matter/bridge` | `deviceId`, `positionId` |
+| A gateway's bridge subdevices | POST `/app/dev/matter/bridge/subdevice` | `positionId`, `gatewayId` |
+
+`MatterBridgeGatewayBean` contains `deviceId`, model/name/position fields,
+online/support/SSID-support states, and current/maximum device counts.
+`MatterBridgeSubDeviceBean` adds a bind-support state. Neither response type
+contains a Matter endpoint ID or a lock command definition. Bridge eligibility
+therefore does not establish an executable cloud lock route.
+
+`tools/cloud_probe.py --bridges` includes these queries, following gateway IDs
+returned by parent relationships and bridge metadata. It also reads each
+identified hub's Matter details, so a hub-owned lock endpoint can be checked
+without assuming the U100 itself supports `/matter/dev/detail`. No bridge
+binding, unbinding, or device reconfiguration is performed. All three queries
+remain unverified against a live authenticated account.
+
 ## Optional LAN validation
 
 1. Resolve a reachable M3 advertisement with Hub Cluster/LAN Control enabled.

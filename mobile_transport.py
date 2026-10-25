@@ -38,10 +38,14 @@ MATTER_RESOURCES = "/res/query/by/resourceId"
 TRAIT_READ = "/app/qlink/trait/read"
 PANELS = "/app/layout/collection/panels"
 SPEC = "/app/aqara/spec/config"
+GATEWAY_DETAIL = "/dev/query/gateway/detail"
+BRIDGE_GATEWAYS = "/app/dev/matter/bridge"
+BRIDGE_DEVICES = "/app/dev/matter/bridge/subdevice"
 ALLOWED = {("POST", LOGIN), ("GET", HOMES), ("GET", DEVICES),
            ("GET", DETAIL), ("POST", RESOURCES), ("GET", PLUGINS),
            ("GET", MATTER_DETAIL), ("POST", MATTER_RESOURCES),
-           ("POST", TRAIT_READ), ("GET", PANELS), ("GET", SPEC)}
+           ("POST", TRAIT_READ), ("GET", PANELS), ("GET", SPEC),
+           ("GET", GATEWAY_DETAIL), ("POST", BRIDGE_GATEWAYS), ("POST", BRIDGE_DEVICES)}
 MAX_RESPONSE = 4 * 1024 * 1024
 
 
@@ -210,6 +214,16 @@ class MobileClient:
     def specification(self):
         """Global semantics are reference data, never proof of device support."""
         return self._call("GET", SPEC, {})
+
+    def gateway_details(self, device_id):
+        return self._call("GET", GATEWAY_DETAIL, {"deviceId": device_id})
+
+    def bridge_gateways(self, device_id, home_id):
+        """Read bridge eligibility; this does not bind or reconfigure a device."""
+        return self._call("POST", BRIDGE_GATEWAYS, {"deviceId": device_id, "positionId": home_id})
+
+    def bridge_devices(self, home_id, gateway_id):
+        return self._call("POST", BRIDGE_DEVICES, {"positionId": home_id, "gatewayId": gateway_id})
 
     def traits(self, device_id, paths):
         paths = list(paths)

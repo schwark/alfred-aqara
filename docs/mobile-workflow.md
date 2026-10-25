@@ -124,6 +124,10 @@ safe error codes. Detailed evidence stays in the private file
 `~/.cache/alfred-aqara/cloud-evidence.json` with mode `0600`; it is excluded
 from source and workflow packages. Without mobile sessions, it reports
 `sign_in_required` instead of trying credentials or logging private data.
+Add `--bridges` to also query cloud bridge eligibility, gateway details,
+bridge subdevices, and hub Matter endpoints. This reads existing relationships;
+it does not bind or unbind devices. Eligibility alone does not prove that a
+hub-owned lock command is exposed through the cloud.
 
 ## Data and updates
 

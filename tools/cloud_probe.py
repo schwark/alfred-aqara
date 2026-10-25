@@ -55,7 +55,7 @@ def error_code(exc):
     return {"error": "query_failed", "code": exc.code} if isinstance(exc, MobileAPIError) else {"error": "query_failed"}
 
 
-def inspect_device(client, row):
+def inspect_device(client, row, home_id=None, bridges=False):
     did = str(row["did"])
     result = {"catalog_entry": row}
     for name, call in (("panels", client.panels), ("matter", client.matter_details), ("details", client.details)):
@@ -71,10 +71,15 @@ def inspect_device(client, row):
             result["trait_pages"].append(client.traits(did, paths[start:start + 300]))
         except AqaraError as exc:
             result["trait_pages"].append(error_code(exc))
+    if bridges and home_id:
+        try:
+            result["bridge_gateways"] = client.bridge_gateways(did, home_id)
+        except AqaraError as exc:
+            result["bridge_gateways"] = error_code(exc)
     return result
 
 
-def inspect_profile(store, include_devices=False):
+def inspect_profile(store, include_devices=False, bridges=False):
     if not store.secrets().get("token"):
         return {"status": "sign_in_required"}, {"status": "sign_in_required"}
     client = store.mobile_client()
@@ -89,13 +94,35 @@ def inspect_profile(store, include_devices=False):
         identifier = str(home.get("homeId") or home["positionId"])
         devices = client.catalog("devices", identifier)
         device_count += len(devices)
-        result["homes"].append({"catalog_entry": home, "devices": [inspect_device(client, row) for row in devices] if include_devices else devices})
+        inspected = [inspect_device(client, row, identifier, bridges) for row in devices] if include_devices else devices
+        entry = {"catalog_entry": home, "devices": inspected}
+        if bridges:
+            # Only query gateways identified by returned device relationships
+            # or bridge metadata; do not guess hub IDs or modify bridge setup.
+            gateways = {str(row["parentDeviceId"]) for row in devices if row.get("parentDeviceId")}
+            for device in inspected:
+                rows = device.get("bridge_gateways", [])
+                if isinstance(rows, list):
+                    gateways.update(str(row["deviceId"]) for row in rows if isinstance(row, dict) and row.get("deviceId"))
+            entry["gateways"] = []
+            for gateway in sorted(gateways):
+                record = {"device_id": gateway}
+                for name, call in (("details", lambda: client.gateway_details(gateway)),
+                                   ("bridge_devices", lambda: client.bridge_devices(identifier, gateway)),
+                                   ("matter", lambda: client.matter_details(gateway))):
+                    try:
+                        record[name] = call()
+                    except AqaraError as exc:
+                        record[name] = error_code(exc)
+                entry["gateways"].append(record)
+        result["homes"].append(entry)
     return result, {"status": "queried", "homes": len(homes), "devices": device_count}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--devices", action="store_true", help="Also read every device's endpoints, traits, and extended metadata")
+    parser.add_argument("--bridges", action="store_true", help="Also read gateway and Matter bridge metadata; implies --devices")
     parser.add_argument("--output", type=Path, default=PRIVATE_ROOT / "cloud-evidence.json")
     args = parser.parse_args()
     store = MobileStore()
@@ -103,7 +130,7 @@ def main():
     summaries = []
     for profile in store.profiles():
         try:
-            data, summary = inspect_profile(store.for_profile(profile["id"]), args.devices)
+            data, summary = inspect_profile(store.for_profile(profile["id"]), args.devices or args.bridges, args.bridges)
         except AqaraError as exc:
             data = summary = error_code(exc)
         evidence["profiles"].append(data)

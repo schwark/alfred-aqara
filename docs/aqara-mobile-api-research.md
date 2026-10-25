@@ -1122,3 +1122,13 @@ removed from saved responses. This research tool is excluded from workflow
 packages. Offline regression tests cover binding, unit conversion, range
 validation, authenticated-route priority, no retry after failure, endpoint
 merging, retained Agent functionality, and private evidence handling.
+
+Read-only bridge discovery now includes GET `/dev/query/gateway/detail`
+(`deviceId`), POST `/app/dev/matter/bridge` (`deviceId`, `positionId`), and
+POST `/app/dev/matter/bridge/subdevice` (`positionId`, `gatewayId`), all below
+`/app/v1.0/lumi`. These request fields and response types were recovered from
+`IDeviceHttpApi`/`DeviceHttpModel`. They report bridge eligibility and support
+states, not executable lock commands. The private evidence tool's `--bridges`
+mode follows returned gateway relationships and reads the hubs' Matter
+metadata. Bind/unbind APIs are excluded from the discovery client's allowlist.
+These routes have not yet been validated with an authenticated live session.
