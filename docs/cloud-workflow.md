@@ -6,4 +6,4 @@ Agent and Cloud use the same `aq` keyword; choose with `aq mode`.
 
 - [Cloud API research notes](aqara-cloud-api-research.md)
 - [M3 hub investigation](aqara-hub-api-research.md)
-- [v0.3.0 release notes](releases/v0.3.0.md)
+- [v0.3.1 release notes](releases/v0.3.1.md)

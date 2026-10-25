@@ -939,7 +939,7 @@ reference or embeds its shared app keys in source control. Each sign-in
 requires an explicit API area and country district; authentication is not
 automatically retried.
 
-The full release suite passes 157 tests on Python 3.9 and 3.14. Coverage includes
+The full release suite passes 160 tests on Python 3.9 and 3.14. Coverage includes
 encryption, signing, reference parsing, regional routing, safe errors, read-only
 capture guards, shared capability discovery, Agent fallback, multi-home
 selection, mode persistence, migration rollback, stale-action rejection, and
@@ -1227,7 +1227,8 @@ Agent home IDs can be opaque and differ from Cloud home IDs. `aq home link`
 stores an explicit association in that profile's local settings; names do
 not automatically link homes or devices. Exact device/subject IDs still
 determine writes. Original Agent endpoints and scenes remain available, and
-native entries with duplicate names receive a `(Cloud)` suffix. These local
+duplicate Cloud device names use room labels. Agent-only devices are not
+appended to the Cloud inventory. These local
 links, sessions, catalogues, downloaded definitions, and test evidence are
 excluded from repository and workflow assets.
 
@@ -1259,3 +1260,18 @@ separate package format is ignored by the unified updater. The package includes
 `README.md` and `README-cloud.md`; Alfred's embedded help contains both guides.
 Research tools and this report are not packaged. See the
 [v0.3.0 release notes](releases/v0.3.0.md) for installation and upgrade steps.
+
+
+### Device catalog isolation in 0.3.1
+
+Cloud mode's visible device inventory comes only from Cloud discovery. Agent
+endpoint metadata is held separately during refresh and can attach fallback
+commands to an exactly matched Cloud endpoint; it does not create another row
+or replace the Cloud device's name/identifier. Unknown matches remain unlinked,
+and Agent-only devices are available in Agent mode.
+
+`CloudStore.read()` also projects pre-0.3.1 mixed current/home caches onto their
+Cloud rows before search, status, command validation, or home switching. It
+removes the old cross-source display suffix where applicable and rebuilds
+room labels without merging different Cloud devices by name. This takes effect
+without a network refresh and leaves the original Agent mode data untouched.

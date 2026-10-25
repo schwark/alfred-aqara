@@ -142,22 +142,22 @@ class CloudBackendTest(unittest.TestCase):
         before = (source.directory / "settings.json").read_bytes()
         empty = CloudStore(Path(self.temp.name) / "import", keychain_factory=self.factory)
         empty.import_agent(source)
-        self.assertEqual(empty.read("catalog"), catalog)
+        self.assertEqual(empty.read("catalog"), dict(catalog, devices=[]))
+        self.assertEqual(json.loads((empty.directory / "catalog.json").read_text()), catalog)
         self.assertTrue(empty.read("settings")["showstatus"])
         self.assertEqual((source.directory / "settings.json").read_bytes(), before)
         self.assertEqual(empty.secrets(), {"agent_key": "example-agent-key"})
         with self.assertRaises(AqaraError):
             empty.import_agent(source)
-        with patch.object(empty, "status", return_value={"Power": "On"}):
-            items = build_items("Desk Light", empty, self.updater)
-        self.assertTrue({"Turn on", "Turn off", "Set brightness", "Set color", "Set color temperature"}.issubset({i["title"] for i in items}))
-        agent = Mock()
-        with patch.object(empty, "client", return_value=agent):
+        items = build_items("Desk Light", empty, self.updater)
+        self.assertFalse(any(i["valid"] for i in items))
+        with patch.object(empty, "client") as agent, self.assertRaises(AqaraError):
             command.execute({"action": "control", "home_id": "example-home", "profile_id": "default",
                              "id": "example-light", "command": "dim", "value": "50"}, empty)
-        agent.request.assert_called_once_with("device/control", {"device_ids": ["example-light"], "attribute": "brightness", "action": "set", "value": "50"})
+        agent.assert_not_called()
+        self.assertEqual(source.read("catalog"), catalog)
 
-    def test_hybrid_refresh_preserves_agent_and_keeps_same_name_devices_distinct(self):
+    def test_cloud_refresh_only_lists_cloud_devices_even_when_agent_names_match(self):
         self.values["default"] = json.dumps({"agent_key": "example-key", "token": "example-token"})
         agent = Mock()
         agent.request.side_effect = [[{"positionId": "example-home", "positionName": "Example Home"}],
@@ -170,11 +170,11 @@ class CloudBackendTest(unittest.TestCase):
         with patch.object(self.store, "client", return_value=agent), patch.object(self.store, "cloud_client", return_value=self.mobile):
             self.store.refresh()
         catalog = self.store.read("catalog")
-        self.assertEqual({d["id"] for d in catalog["devices"]}, {"agent-lock", "agent-light", "mobile:example-device#7"})
-        self.assertEqual(next(d for d in catalog["devices"] if d.get("backend") == "mobile")["name"], "Entry Lock (Cloud)")
+        self.assertEqual({d["id"] for d in catalog["devices"]}, {"mobile:example-device#7"})
+        self.assertEqual(catalog["devices"][0]["name"], "Entry Lock")
+        self.assertNotIn("agent_fallback", catalog["devices"][0])
         self.assertEqual({s["id"] for s in catalog["scenes"]}, {"agent-scene", "mobile:native-scene"})
-        agent_lock = next(d for d in catalog["devices"] if d["id"] == "agent-lock")
-        self.assertNotIn("unlock", controls(agent_lock))
+        self.assertIn("unlock", controls(catalog["devices"][0]))
 
     def test_multiple_accounts_and_home_rollback_use_same_mobile_store(self):
         target = self.store.add_profile("Second region", "{}")
@@ -207,12 +207,55 @@ class CloudBackendTest(unittest.TestCase):
         devices = self.store.read("catalog")["devices"]
         self.assertEqual(len(devices), 1)
         device = devices[0]
-        self.assertEqual(device["id"], "example-subject")
+        self.assertEqual(device["id"], "mobile:example-native-device#2")
+        self.assertEqual(device["agent_fallback"], {"id": "example-subject", "type": "DimmableLight"})
         self.assertEqual(device["did"], "example-native-device")
         self.assertEqual(set(controls(device)), {"status", "on", "off", "dim", "color", "ct"})
         with patch.object(self.store, "cloud_client", return_value=self.mobile):
             items = build_items("Desk Light status", self.store, self.updater)
         self.assertEqual(items[0]["subtitle"], "Power: On")
+        fallback = Mock()
+        with patch.object(self.store, "client", return_value=fallback), patch.object(self.store, "cloud_client") as native:
+            self.store.control(device, "color", "blue")
+        native.assert_not_called()
+        fallback.request.assert_called_once_with("device/control", {
+            "device_ids": ["example-subject"], "attribute": "color", "action": "set", "value": "blue"})
+
+    def test_old_mixed_caches_only_expose_cloud_rows_without_a_network_refresh(self):
+        agent = {"id": "agent-lock", "name": "Entry Lock", "type": "DoorLock", "room": "Hall"}
+        cloud = dict(self.device, name="Entry Lock (Cloud)", label="Entry Lock (Cloud)")
+        catalog = {"home_id": "example-home", "devices": [agent, cloud], "scenes": []}
+        self.store.write("catalog", catalog)
+        self.store.write("catalogs", {"example-home": catalog})
+        before = (self.store.directory / "catalog.json").read_bytes()
+        with patch.object(self.store, "cloud_client") as native, patch.object(self.store, "client") as fallback:
+            visible = self.store.read("catalog")
+            self.assertEqual([d["id"] for d in visible["devices"]], [self.device["id"]])
+            self.assertEqual(visible["devices"][0]["name"], "Entry Lock")
+            self.assertEqual(self.store.read("catalogs")["example-home"], visible)
+            rows = build_items("Entry Lock", self.store, self.updater)
+            self.assertEqual([i["title"] for i in rows], ["Show status", "Lock", "Unlock"])
+            native.assert_not_called()
+            fallback.assert_not_called()
+        self.assertEqual((self.store.directory / "catalog.json").read_bytes(), before)
+
+    def test_cloud_cache_keeps_distinct_cloud_devices_with_the_same_name(self):
+        other = dict(self.device, id="mobile:other-device#7", did="other-device", room="Office")
+        self.store.write("catalog", {"home_id": "example-home", "devices": [self.device, other], "scenes": []})
+        devices = self.store.read("catalog")["devices"]
+        self.assertEqual(len(devices), 2)
+        self.assertEqual({d["label"] for d in devices}, {"Entry Lock (Hall)", "Entry Lock (Office)"})
+
+    def test_cached_home_switch_does_not_restore_agent_rows_in_cloud_mode(self):
+        settings = self.store.read("settings")
+        settings["homes"].append({"id": "other-home", "name": "Another Home"})
+        self.store.write("settings", settings)
+        self.store.write("catalogs", {"other-home": {"home_id": "other-home", "devices": [
+            {"id": "agent-only", "name": "Agent-only device"}, self.device], "scenes": []}})
+        with patch.object(self.store, "refresh") as refresh:
+            _, catalog = self.store.switch_home("other-home")
+        refresh.assert_not_called()
+        self.assertEqual([d["id"] for d in catalog["devices"]], [self.device["id"]])
 
     def test_home_ids_are_linked_only_by_explicit_selection_and_can_be_unlinked(self):
         self.values["default"] = json.dumps({"agent_key": "example-key", "token": "example-token"})

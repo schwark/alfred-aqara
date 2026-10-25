@@ -14,7 +14,8 @@ One keyword, `aq`, supports both **Agent** and **Cloud** modes. Run `aq mode`
 to choose, `aq mode cloud` to enable Cloud, or `aq mode agent` to switch back.
 Agent is the default, and the choice is remembered. Cloud mode adds supported
 lock/unlock commands; see [README-cloud.md](README-cloud.md) for authentication,
-capabilities, and setup. Each mode keeps its own accounts and selected home.
+capabilities, and setup. Each mode keeps its own accounts and selected home. Device lists contain only
+devices from the selected mode; Cloud does not append the Agent inventory.
 
 ## Requirements
 
@@ -30,9 +31,9 @@ capabilities, and setup. Each mode keeps its own accounts and selected home.
 These steps connect the default Agent mode. For Cloud, switch with `aq mode cloud`
 and follow [the Cloud setup guide](README-cloud.md#connect-cloud-mode).
 
-1. Download [Aqara-0.3.0.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.0/Aqara-0.3.0.alfredworkflow)
+1. Download [Aqara-0.3.1.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.1/Aqara-0.3.1.alfredworkflow)
    and open it to import into Alfred. To build from source, run
-   `python3 workflow-build` and open `dist/Aqara-0.3.0.alfredworkflow`.
+   `python3 workflow-build` and open `dist/Aqara-0.3.1.alfredworkflow`.
 2. Type `aq login` in Alfred and press Return. Sign in with your Aqara account.
 3. Copy the **aqara_api_key** shown on the page. Type `aq apikey` in Alfred and
    press Return to paste it into the secure dialog. It is saved in macOS Keychain.
@@ -55,7 +56,7 @@ before switching must be selected again afterward.
 | Mode | Connection | Controls |
 | --- | --- | --- |
 | Agent (default) | Aqara Agent API key | Existing device controls and scenes; locks show status |
-| Cloud | Aqara Home session and signing identity | Advertised lock/unlock, power, brightness, and color temperature; Agent fallback retains other controls and scenes |
+| Cloud | Aqara Home session and signing identity | Advertised lock/unlock, power, brightness, and color temperature; Exact Agent matches can add controls on the same Cloud row |
 
 Each mode remembers its own accounts, selected home, catalogs, and status
 preferences. Updates apply to the one workflow, and `aq reinit` resets only
@@ -66,7 +67,7 @@ connections remain available. Then use `aq mode cloud` and follow
 [the Cloud guide](README-cloud.md#connect-cloud-mode) if you want Cloud controls.
 For migration from the earlier parallel workflow, see
 [Cloud migration](README-cloud.md#upgrading-from-the-parallel-workflow).
-Changes and validation are in the [v0.3.0 release notes](docs/releases/v0.3.0.md).
+Changes and validation are in the [v0.3.1 release notes](docs/releases/v0.3.1.md).
 
 ## Commands
 
@@ -233,8 +234,8 @@ Errors appear in Alfred's workflow debugger as well as its notifications.
 
 `aq mode cloud` selects the Aqara Home cloud connection in this same workflow.
 Cloud unlock followed by lock has been verified with U100 and U300 through the
-shared API. Cloud mode retains Agent fallback for commands outside its native
-coverage. Switch back at any time with `aq mode agent`.
+shared API. Cloud mode lists only Cloud devices. Verified Agent endpoint matches
+can supply additional commands on those rows; Agent-only devices stay in Agent mode. Switch back at any time with `aq mode agent`.
 
 See [README-cloud.md](README-cloud.md) for setup, command coverage, multiple
 accounts and homes, migration from the earlier parallel workflow, and limitations.
@@ -255,7 +256,7 @@ profile. The build uses an explicit file allowlist and excludes local data,
 tests, `.git`, and credentials. Both macOS's Python 3.9 and current Homebrew
 Python are supported.
 
-The v0.3.0 suite passes 157 offline tests on Python 3.9 and 3.14. Tests cover
+The v0.3.1 suite passes 160 offline tests on Python 3.9 and 3.14. Tests cover
 mode persistence, migration rollback, account/home isolation, stale selections,
 native capability checks, retained Agent controls, and verified update downloads.
 The offline suite does not send physical device commands.

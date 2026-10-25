@@ -20,10 +20,13 @@ reported-state changes. The tested U100 route works through its M3 without
 phone-to-lock pairing keys. Capability discovery uses Aqara's current endpoint
 definitions and device metadata rather than bundled drivers for each model.
 
-Importing your existing Agent profiles preserves their controls and scenes.
+Cloud mode lists **only devices returned by the Cloud API**. Agent-only devices
+stay in Agent mode. Importing Agent profiles supplies credentials and fallback
+metadata; it does not add their devices to the Cloud list.
+
 Native Cloud commands cover lock/unlock, power, brightness, and color
-temperature where advertised. **Full command coverage still uses Agent
-fallback** for controls such as color, curtains, and climate. This mode uses
+temperature where advertised. An exact Agent endpoint match can add fallback
+controls such as color, curtains, and climate to the same Cloud device row. This mode uses
 undocumented app APIs and remains experimental.
 
 ## Requirements
@@ -32,7 +35,7 @@ undocumented app APIs and remains experimental.
 - Python 3.9 or newer; no additional Python packages are required.
 - An Aqara Home account with devices in the account's selected region.
 - A separately obtained app-identity reference for signing Cloud API requests.
-- An Aqara Agent connection to retain controls outside the native Cloud coverage.
+- An optional Aqara Agent connection for additional controls on exactly matched Cloud endpoints.
 
 The Mac needs internet access. A hub IP address, Home Assistant, an Android
 emulator, and capture tools are not required at runtime. Cloud mode is a connection
@@ -40,13 +43,13 @@ option; it does not require a second workflow or keyword.
 
 ## Connect Cloud mode
 
-Install [Aqara-0.3.0.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.0/Aqara-0.3.0.alfredworkflow)
+Install [Aqara-0.3.1.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.1/Aqara-0.3.1.alfredworkflow)
 from [GitHub Releases](https://github.com/schwark/alfred-aqara/releases/latest).
 Both modes are included. To build from the repository instead:
 
 ```sh
 python3 workflow-build
-open dist/Aqara-0.3.0.alfredworkflow
+open dist/Aqara-0.3.1.alfredworkflow
 ```
 
 1. Run `aq mode cloud`. If the earlier parallel workflow was configured,
@@ -159,10 +162,13 @@ the previous selection.
   `aq home update` discovers homes across all saved connections.
 
 Home links are explicit when API IDs differ; similar names never create a
-link automatically. Devices are combined only by exact device IDs or a unique
-returned endpoint identifier matching the Agent endpoint ID. Unmatched Cloud
-devices remain separate; a duplicate display name gets a `(Cloud)` suffix.
-Multi-endpoint devices can have separate entries.
+link automatically. Cloud devices use their Cloud names and identifiers. A
+fallback is attached only by an exact device ID or a unique returned endpoint
+identifier matching the Agent endpoint ID; names never attach controls.
+Unmatched Agent devices remain accessible with `aq mode agent`. Different Cloud
+devices with the same name use room labels, and multi-endpoint devices can have
+separate entries. Existing mixed caches are filtered automatically, including
+cached catalogs restored when switching homes.
 
 Matched devices keep their original Agent commands. Native power, brightness,
 and color-temperature controls are used when advertised and compatible with

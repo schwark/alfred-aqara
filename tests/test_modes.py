@@ -31,8 +31,9 @@ class ModeTest(unittest.TestCase):
 
     def seed(self, store, name="Desk Light"):
         store.write("settings", {"home_id": "example-home", "home_name": "Example Home"})
+        backend = {"backend": "mobile", "did": "example-device"} if store.mode == "cloud" else {}
         store.write("catalog", {"home_id": "example-home", "devices": [
-            {"id": "example-light", "name": name, "type": "Light", "room": "Office"}], "scenes": []})
+            {"id": "example-light", "name": name, "type": "Light", "room": "Office", **backend}], "scenes": []})
 
     def test_default_is_agent_and_legacy_environment_does_not_select_cloud(self):
         with patch.dict(os.environ, {"AQARA_BACKEND": "mobile"}):
@@ -222,7 +223,8 @@ class MigrationTest(unittest.TestCase):
         self.assertEqual(cloud.read("settings")["home_name"], "Example Home (Cloud)")
         self.assertEqual(cloud.read("settings")["home_links"], {"agent-home": "example-home"})
         self.assertEqual(cloud.read("catalog")["devices"][0], {
-            "id": "mobile:example-device#7", "backend": "mobile", "name": "Example Lock (Cloud)"})
+            "id": "mobile:example-device#7", "backend": "mobile", "name": "Example Lock (Cloud)",
+            "label": "Example Lock (Cloud)"})
         self.assertEqual(self.values[(BUNDLE, "connection:other")], self.original[("com.schwark.aqara.mobile", "connection:other")])
         self.assertEqual(self.values[(BUNDLE, "app-identity")], "example-app-identity")
         self.assertFalse(runtime.migrate_cloud(self.root, self.legacy))

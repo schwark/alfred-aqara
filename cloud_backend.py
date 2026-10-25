@@ -263,6 +263,35 @@ class CloudStore(Store):
         factory = keychain_factory or (lambda identifier: Keychain(service=BUNDLE, account="connection:" + identifier))
         super().__init__(directory, keychain, profile_id, factory)
 
+    @staticmethod
+    def cloud_catalog(catalog):
+        """Project older mixed caches onto the Cloud inventory without a refresh."""
+        if not catalog:
+            return catalog
+        agent_names = {d["name"] for d in catalog.get("devices", []) if d.get("backend") != "mobile"}
+        devices = []
+        for device in catalog.get("devices", []):
+            if device.get("backend") != "mobile":
+                continue
+            device = dict(device)
+            name = device["name"]
+            if name.endswith(" (Cloud)") and name.removesuffix(" (Cloud)") in agent_names:
+                device["name"] = device["device_name"] = name.removesuffix(" (Cloud)")
+            devices.append(device)
+        labels = normalize([{"endpoint_id": d["id"], "device_name": d["name"],
+                             "position_name": d.get("room", ""), "device_type": d.get("type", "")}
+                            for d in devices], "devices")
+        by_id = {d["id"]: d for d in devices}
+        return dict(catalog, devices=[dict(by_id[d["id"]], label=d["label"]) for d in labels])
+
+    def read(self, name):
+        value = super().read(name)
+        if name == "catalog":
+            return self.cloud_catalog(value)
+        if name == "catalogs":
+            return {identifier: self.cloud_catalog(catalog) for identifier, catalog in value.items()}
+        return value
+
     def secrets(self):
         try:
             value = json.loads(self.keychain.get() or "{}")
@@ -350,11 +379,11 @@ class CloudStore(Store):
         home = next((h for h in settings["homes"] if h["id"] == settings.get("home_id")), None)
         if not home:
             raise AqaraError("Choose a home with aq home, then run aq update.")
-        devices, scenes = [], []
+        devices, agent_devices, scenes = [], [], []
         if home.get("agent"):
             agent = client or self.client()
             agent.home_id = home["id"]
-            devices = normalize(agent.request("home/devices/query"), "devices")
+            agent_devices = normalize(agent.request("home/devices/query"), "devices")
             scenes = normalize(agent.request("home/scenes/query"), "scenes")
         native_failures = 0
         if home.get("mobile_id"):
@@ -385,17 +414,12 @@ class CloudStore(Store):
                     # Merge only an exact identifier; never associate a write by name.
                     subject_key = cap.get("subject_key")
                     unique_subject = subject_key and sum(c.get("subject_key") == subject_key for c in endpoints) == 1
-                    matches = [d for d in devices if d.get("backend") != "mobile" and
+                    matches = [d for d in agent_devices if
                                ((unique_subject and d["id"] == subject_key) or (len(endpoints) == 1 and d["id"] == did))]
                     existing = matches[0] if len(matches) == 1 else None
                     if existing and caps:
-                        fallback = {"id": existing["id"], "type": existing["type"]}
-                        existing.update({k: v for k, v in device.items() if k not in ("id", "name", "room", "device_name")})
-                        existing["agent_fallback"] = fallback
-                    else:
-                        if any(d["name"].casefold() == name.casefold() for d in devices):
-                            device["name"] += " (Cloud)"
-                        devices.append(device)
+                        device["agent_fallback"] = {"id": existing["id"], "type": existing["type"]}
+                    devices.append(device)
             native_scenes = mobile.catalog("scenes", home["mobile_id"])
             for row in native_scenes:
                 identifier = str(row["sceneId"])
@@ -643,12 +667,12 @@ class CloudStore(Store):
             devices = catalog.get("devices", [])
             native = [d for d in devices if d.get("backend") == "mobile"]
             locks = [d for d in native if any(c in controls(d) for c in ("lock", "unlock"))]
-            fallback = [d for d in devices if d.get("backend") != "mobile" or d.get("agent_fallback")]
+            fallback = [d for d in native if d.get("agent_fallback")]
             native_controls = [d for d in native if d.get("cloud_controls")]
             return [item("Cloud command coverage", "%s endpoints advertise lock commands · Shared cloud route verified with U100 and U300" % len(locks)),
-                    item("Agent fallback", "%s endpoints retain their existing commands and scenes" % len(fallback)),
+                    item("Agent fallback", "%s Cloud endpoints have an exact Agent match for additional commands" % len(fallback)),
                     item("Native device controls", "%s endpoints advertise common power, brightness, or color-temperature traits" % len(native_controls)),
-                    item("Native coverage gaps", "Unsupported controls retain Agent fallback; devices without common commands remain read-only"),
+                    item("Native coverage gaps", "Unmatched Agent devices stay in Agent mode; unknown Cloud controls remain read-only"),
                     item("Native scenes", "%s discovered · Native scenes use the app API; existing Agent scenes retain their route" % catalog.get("native_scene_count", 0)),
                     item("Partial metadata reads", "%s devices have an unavailable metadata route" % catalog.get("native_capability_failures", 0))]
         extra = [("import", "Import current Agent profiles", "Copy accounts and cached catalogs; keep Agent mode unchanged", "mobile_import"),
