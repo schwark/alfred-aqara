@@ -1007,3 +1007,50 @@ and its plaintext copy removed. The installed SDK and isolated tooling
 remain available for later research. Rebuilding the workflow produced the
 same SHA-256 as the published v0.2.7 package; this investigation changed
 research documentation and tools only.
+
+
+## Parallel workflow experiment
+
+The branch now contains a separately packaged `aqm` implementation. Its guide
+is [mobile-workflow.md](mobile-workflow.md). The stable Agent workflow remains
+separate. `mobile_transport.py` shares the signed transport with the read-only
+probe; `mobile_backend.py` adds a small explicit write allowlist. The research
+probe itself still refuses device writes.
+
+The experiment preserves current commands through imported Agent profiles,
+adds mobile home/device discovery and shared Matter lock actions, and shows
+coverage gaps with `aqm parity`. It is a hybrid experiment, not evidence of full
+mobile-only parity. The common writer has no per-model command dispatch. An
+endpoint must advertise DoorLock command 35010 or 35011, and capabilities are
+queried again before execution. The native device-password dialog is supported;
+legacy paired encrypted lock transport is not.
+
+Additional scene routes confirmed in the recovered app code:
+
+| Operation | Method and path | Fields |
+| --- | --- | --- |
+| Scene list | GET `/app/v1.0/lumi/app/position/scene/query` | `positionId`, `startIndex`, `size`; optional name/room/category filters |
+| Scene run | POST `/app/v1.0/lumi/ifttt/scene/run` | `sceneId`, `userId` |
+
+`SceneRepository.querySceneList` builds the list parameters; `SceneListEntity`
+contains `scenes` and `count`. `HomeCardApi.executeScene` declares the POST route;
+`CardSceneRepository.executeScene` constructs the two-field body. These are
+request-construction findings, not successful live scene execution. Existing
+Agent scenes retain their verified route when scene IDs match exactly.
+
+The catalog walker supports paginated homes (`homeId`, `homeName`), devices
+(`did`), and scenes (`sceneId`), rejects repeated/incomplete pages, and retains
+prior catalogs on failure. Cross-API home/device association requires exact
+identifiers; display-name similarity never selects a write target. Native
+status is reduced to known resource fields before reaching Alfred's subtitle.
+
+Validation covers stable feature preservation after import, multiple profiles,
+home-switch rollback, exact endpoint revalidation, cancellation, password
+rejection, timeout without retries/fallback, resource formatting, scene request
+construction, explicit packaging, and isolated update channels. Tests use
+invented accounts/devices. A fresh live mobile session was unavailable during
+implementation because credential stores required unlocking. Read-only live
+Agent refreshes verified that imported profiles retained the previous device
+command sets and scenes. No lock or scene
+was actuated as part of this validation. Do not treat passing fixture tests as
+physical execution evidence.

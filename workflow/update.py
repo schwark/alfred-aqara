@@ -442,7 +442,10 @@ def latest_download(dls, alfred_version=None, prereleases=False):
 
     dls.sort(reverse=True)
 
+    from updater import correct_variant
     for dl in dls:
+        if not correct_variant(dl.filename):
+            continue
         if dl.prerelease and not prereleases:
             wf.logger.debug("ignored prerelease: %s", dl.version)
             continue

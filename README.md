@@ -187,6 +187,15 @@ and `aq apikey` to reconnect. Workflow errors identify the failed operation and
 known account problems without displaying raw server messages or credentials.
 Errors appear in Alfred's workflow debugger as well as its notifications.
 
+## Parallel mobile API experiment
+
+The `codex/aqara-mobile-api` branch also builds a separate `aqm` workflow with
+mobile capability discovery and experimental lock commands, while retaining
+Agent controls as a fallback. See [the mobile workflow guide](docs/mobile-workflow.md)
+and [API research notes](docs/aqara-mobile-api-research.md). Mobile-only feature
+parity and live lock execution remain unverified; the experiment has its own
+bundle, local data, Keychain service, and prerelease update channel.
+
 ## Development
 
 ```sh

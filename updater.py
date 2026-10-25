@@ -26,11 +26,18 @@ MAX_DOWNLOAD = 16 * 1024 * 1024
 CACHE_ERRORS = (OSError, ValueError, TypeError, KeyError, EOFError, pickle.UnpicklingError)
 
 
+def correct_variant(filename):
+    if not isinstance(filename, str):
+        return False
+    mobile = BUNDLE_ID.endswith(".mobile")
+    return filename.startswith("Aqara-Mobile-") if mobile else filename.startswith("Aqara-") and not filename.startswith("Aqara-Mobile-")
+
+
 class Updater:
     def __init__(self, directory, current_version=None):
         self.version = current_version or Path(__file__).with_name("version").read_text().strip()
         self.directory = Path(directory) / "workflow-updates"
-        self.workflow = Workflow(update_settings={"github_slug": REPOSITORY, "version": self.version, "frequency": 1}, capture_args=False)
+        self.workflow = Workflow(update_settings={"github_slug": REPOSITORY, "version": self.version, "frequency": 1, "prereleases": BUNDLE_ID.endswith(".mobile")}, capture_args=False)
         # The framework owns its settings.json; Aqara owns a different settings.json.
         self.workflow.alfred_env.update(workflow_data=str(self.directory / "data"),
                                         workflow_cache=str(self.directory / "cache"),
@@ -53,6 +60,7 @@ class Updater:
             self._bind()
             status = self.workflow.cached_data(UPDATE_KEY, max_age=0)
             if (isinstance(status, dict) and status.get("available") and status.get("download")
+                    and correct_variant(status["download"].get("filename", ""))
                     and Version(status["version"]) > Version(self.version)):
                 return status
         except CACHE_ERRORS:
@@ -113,7 +121,8 @@ def verified_download(download, directory=None, opener=None):
     """Alfred-Workflow download hook: verify GitHub's checksum before importing."""
     version = str(download.version)
     filename = download.filename
-    if not re.fullmatch(r"Aqara-" + re.escape(version) + r"\.alfred(?:\d+)?workflow", filename):
+    prefix = "Aqara-Mobile-" if BUNDLE_ID.endswith(".mobile") else "Aqara-"
+    if not re.fullmatch(re.escape(prefix) + re.escape(version) + r"\.alfred(?:\d+)?workflow", filename):
         raise AqaraError("The release asset is not an Aqara workflow.")
     url = urlsplit(download.url)
     paths = ["/" + REPOSITORY + "/releases/download/" + prefix + version + "/" + filename for prefix in ("v", "")]

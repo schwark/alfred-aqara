@@ -9,6 +9,7 @@ import sys
 from common import AqaraError, Store, control_body, controls, selector, table_rows
 from keychain import KeychainError
 from updater import Updater
+from runtime import get_store
 
 
 def item(title, subtitle="", action=None, autocomplete=None, uid=None):
@@ -158,6 +159,7 @@ def device_items(store, device, remainder):
     label = selector(device)
     context = label + " · " + scope_label(store)
     titles = {"on": "Turn on", "off": "Turn off", "open": "Open", "close": "Close", "stop": "Stop",
+              "lock": "Lock", "unlock": "Unlock",
               "dim": "Set brightness", "color": "Set color", "ct": "Set color temperature",
               "slevel": "Set position", "mode": "Set mode", "temp": "Set temperature"}
     units = {"dim": "%", "slevel": "%", "ct": " K", "temp": " °C"}
@@ -166,8 +168,8 @@ def device_items(store, device, remainder):
         return status_items(store, device)
     word, _, value = remainder.strip().partition(" ")
     word = word.casefold()
-    lock_note = item(label, "Lock/unlock unavailable through Aqara Agent; another connection is required")
-    if "doorlock" in device.get("type", "").casefold() and word in ("lock", "unlock"):
+    lock_note = item(label, device.get("lock_note", "Lock/unlock unavailable through Aqara Agent; another connection is required"))
+    if "doorlock" in device.get("type", "").casefold() and word in ("lock", "unlock") and word not in commands:
         return [lock_note]
     result = []
     for name, (_attribute, _action, hint) in commands.items():
@@ -210,7 +212,7 @@ def device_items(store, device, remainder):
             action = None
             subtitle = context + " · This command does not accept a value"
         result.append(item(title, subtitle, action, complete))
-    if "doorlock" in device.get("type", "").casefold() and not word:
+    if "doorlock" in device.get("type", "").casefold() and not word and not any(name in commands for name in ("lock", "unlock")):
         result.append(lock_note)
     if not result and not word and store.read("settings").get("showstatus"):
         return []
@@ -244,7 +246,7 @@ def device_choices(devices, remainder=""):
 
 
 def build_items(query, store=None, updater=None):
-    store = store or Store()
+    store = store or get_store()
     updater = updater or Updater(store.root)
     term = query.strip().casefold()
     commands = [
@@ -259,6 +261,8 @@ def build_items(query, store=None, updater=None):
                 for keyword, title, subtitle, action in commands if keyword.startswith(term)] or [
                     item("No matching workflow command", "Use aq workflow:update to check for updates", autocomplete="workflow:update")]
     result = _build_items(query, store)
+    if getattr(store, "is_mobile", False):
+        result = store.decorate_items(query, result)
     if not term:
         result.append(item("Workflow updates", "Check for updates or change automatic checks", autocomplete="workflow:"))
     status = updater.available()
@@ -365,7 +369,7 @@ def _build_items(query, store):
 
 def main():
     try:
-        store = Store()
+        store = get_store()
         updater = Updater(store.root)
         updater.schedule()
         result = build_items(sys.argv[1] if len(sys.argv) > 1 else "", store, updater)

@@ -691,7 +691,7 @@ class PackageTest(unittest.TestCase):
             with ZipFile(archive) as package:
                 self.assertEqual(set(package.namelist()), {
                     "info.plist", "icon.png", "workflow.sh", "filter.py", "command.py", "common.py", "keychain.py",
-                    "updater.py", "README.md", "LICENSE", "version", "workflow/__init__.py", "workflow/workflow.py",
+                    "updater.py", "runtime.py", "README.md", "LICENSE", "version", "workflow/__init__.py", "workflow/workflow.py",
                     "workflow/util.py", "workflow/web.py", "workflow/update.py", "workflow/background.py", "workflow/version", "workflow/LICENSE"})
                 plistlib.loads(package.read("info.plist"))
                 self.assertEqual(package.getinfo("workflow.sh").external_attr >> 16 & 0o777, 0o755)

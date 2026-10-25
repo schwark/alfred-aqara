@@ -8,6 +8,7 @@ import sys
 from common import AqaraError, Client, LOGIN_URL, Store, control_body, normalize, selector
 from keychain import KeychainError
 from updater import Updater
+from runtime import get_store
 
 
 def prompt_key():
@@ -29,7 +30,11 @@ def prompt_profile_name():
 
 
 def execute(action, store=None):
-    store = store or Store()
+    store = store or get_store()
+    if getattr(store, "is_mobile", False):
+        result = store.handle_action(action)
+        if result is not None:
+            return result
     name = action.get("action")
     if name == "workflow_update":
         return Updater(store.root).install()
@@ -137,16 +142,16 @@ def execute(action, store=None):
     target = next((target for target in targets if target["id"] == action.get("id")), None)
     if target is None:
         raise AqaraError("The selected item is no longer in the catalog. Run aq update.")
-    client = store.client()
     if name == "scene":
-        client.request("scene/run", {"scene_ids": [target["id"]]})
+        store.run_scene(target)
         message = "Running “" + target["name"] + "”."
     else:
         command = action.get("command", "")
         value = action.get("value", "")
-        body = control_body(target, command, value)
-        client.request("device/control", body)
+        body = store.control(target, command, value)
         messages = {
+            "lock": "Requesting {device} to lock.",
+            "unlock": "Requesting {device} to unlock.",
             "on": "Turning {device} on.",
             "off": "Turning {device} off.",
             "dim": "Setting {device} to {value}% brightness.",

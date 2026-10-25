@@ -14,7 +14,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from keychain import Keychain, KeychainError
 
-BUNDLE_ID = "com.schwark.aqara"
+BUNDLE_ID = "com.schwark.aqara" + (".mobile" if os.environ.get("AQARA_BACKEND") == "mobile" else "")
 API_URL = "https://agent.aqara.com/open/api"
 LOGIN_URL = "https://agent.aqara.com/login"
 SUCCESS_CODES = (0, 200, "0", "200", "OK", "SUCCESS", "success", None)
@@ -255,7 +255,7 @@ class Store:
         return self._read_path(self.root / "accounts.json").get("active_id", "default")
 
     def for_profile(self, identifier):
-        return Store(self.root, profile_id=identifier, keychain_factory=self.keychain_factory)
+        return type(self)(self.root, profile_id=identifier, keychain_factory=self.keychain_factory)
 
     def activate(self):
         self._write_path(self.root / "accounts.json", {"active_id": self.profile_id, "profiles": self.profiles()})
@@ -375,6 +375,14 @@ class Store:
             raise
         return home, catalog
 
+    def control(self, device, command, value=""):
+        body = control_body(device, command, value)
+        self.client().request("device/control", body)
+        return body
+
+    def run_scene(self, scene):
+        self.client().request("scene/run", {"scene_ids": [scene["id"]]})
+
     def status(self, device, client=None):
         cache = self.read("status")
         key = self.read("settings").get("home_id", "") + ":" + device["id"]
@@ -393,6 +401,12 @@ def selector(device):
 
 def controls(device):
     """Map API device families to the official Aqara control action table."""
+    if device.get("backend") == "mobile":
+        commands = {"status": (None, None, None)}
+        for command in ("lock", "unlock"):
+            if command in device.get("mobile_commands", {}):
+                commands[command] = ("lock_state", command, None)
+        return commands
     kind = device.get("type", "").casefold()
     commands = {"status": (None, None, None)}
     if "doorlock" in kind:
