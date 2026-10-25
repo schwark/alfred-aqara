@@ -152,7 +152,8 @@ one wireless button. The three relay channels offer on/off; the wireless button
 remains read-only. Other models use the same metadata-driven discovery.
 Run `aq update` after renaming channels in Aqara Home.
 
-A Cloud refresh can take several seconds while it reads device capabilities.
+A Cloud refresh can take a few minutes for a large catalog while it reads device
+capabilities.
 A start notification appears immediately; reopen `aq upd` to see progress and,
 after completion, the timestamp and device/scene counts. Device refresh stays
 first, followed by workflow update, including when a new release is available.

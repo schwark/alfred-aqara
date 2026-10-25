@@ -194,8 +194,8 @@ Type `aq up` to choose between refreshing devices and updating the workflow.
 `aq upd`, and `aq update`, including when a workflow upgrade is available.
 `aq work` and `aq workflow:u` also offer Tab completion to `workflow:update`.
 
-Refresh shows a start notification and takes several seconds, especially in
-Cloud mode. Reopen `aq upd` to see it running; results refresh automatically.
+Refresh shows a start notification. Large Cloud catalogs can take a few minutes
+while device capabilities are read. Reopen `aq upd` to see it running; results refresh automatically.
 When it finishes, the refresh row shows when it completed and the device/scene
 counts for that home. Errors are reported in the notification and debugger,
 and the row offers a retry. macOS notification settings can suppress banners;
