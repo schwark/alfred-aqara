@@ -2,7 +2,7 @@
 
 Uses three separately obtained MIT-licensed protocol modules, pinned by SHA256.
 No device writes, scene execution, pairing, settings changes, or lock operations.
-Optional check-in uses an existing mobile session from Keychain, never argv.
+Optional check-in uses an existing Cloud session from Keychain, never argv.
 """
 
 import argparse
@@ -113,7 +113,7 @@ async def inspect_hub(config, tunnel_class, credentials=None, timeout=10):
             raise ProbeError("Use the hub's local address or a private address reachable through your own network.") from None
     if credentials is not None and not all(isinstance(credentials.get(key), str) and credentials[key]
                                           for key in ("token", "user_id")):
-        raise ProbeError("This profile needs a mobile session. Connect it with aqm login.")
+        raise ProbeError("This profile needs a Cloud session. Connect it with aq mode cloud, then aq login.")
     tunnel = tunnel_class(did, keepalive_interval=0)
 
     async def inspect():
@@ -163,7 +163,7 @@ def main():
     parser.add_argument("--discover", action="store_true")
     parser.add_argument("--output", type=Path, help="Private discovery file outside the checkout")
     parser.add_argument("--reference", type=Path, help="Separately cloned Aqara-LANLink reference")
-    parser.add_argument("--profile", help="Optional existing mobile profile ID for hub check-in")
+    parser.add_argument("--profile", help="Optional existing Cloud profile ID for hub check-in")
     args = parser.parse_args()
     try:
         if args.discover:
@@ -177,8 +177,8 @@ def main():
         credentials = None
         if args.profile:
             sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-            from mobile_backend import MobileStore
-            credentials = MobileStore(profile_id=args.profile).secrets()
+            from cloud_backend import CloudStore
+            credentials = CloudStore(profile_id=args.profile).secrets()
         config = json.loads(sys.stdin.read(16385))
         if not isinstance(config, dict):
             raise ProbeError("Pass the selected private hub object on stdin.")

@@ -14,9 +14,9 @@ from zipfile import ZipFile
 import command
 from common import AqaraError, Store, controls, normalize
 from filter import build_items
-from mobile_backend import (BackendClient, MATTER_WRITE, MobileStore, capabilities,
+from cloud_backend import (BackendClient, MATTER_WRITE, CloudStore, capabilities,
                             readings)
-from mobile_transport import AppIdentity, MobileAPIError
+from cloud_transport import AppIdentity, CloudAPIError
 from updater import Updater
 from workflow import update
 
@@ -33,7 +33,7 @@ def lock():
             "backend": "mobile", "mobile_commands": cap["commands"], "mobile_readings": cap["readings"]}
 
 
-class MobileBackendTest(unittest.TestCase):
+class CloudBackendTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -48,7 +48,7 @@ class MobileBackendTest(unittest.TestCase):
                 self.keys[identifier] = key
             return self.keys[identifier]
         self.factory = factory
-        self.store = MobileStore(Path(self.temp.name) / "mobile", keychain_factory=factory)
+        self.store = CloudStore(Path(self.temp.name) / "mobile", keychain_factory=factory)
         self.store.write("settings", {"home_id": "example-home", "home_name": "Example Home",
                                        "homes": [{"id": "example-home", "name": "Example Home", "agent": True,
                                                   "mobile_id": "example-home"}]})
@@ -74,15 +74,15 @@ class MobileBackendTest(unittest.TestCase):
         self.assertEqual(controls({"type": "DoorLock"}).keys(), {"status"})
 
     def test_lock_ui_has_distinct_titles_completion_and_no_browsing_write(self):
-        with patch.object(self.store, "mobile_client") as client:
+        with patch.object(self.store, "cloud_client") as client:
             items = build_items("Entry Lock", self.store, self.updater)
             self.assertEqual([i["title"] for i in items], ["Show status", "Lock", "Unlock"])
             self.assertEqual(items[-1]["autocomplete"], "Entry Lock unlock")
-            self.assertEqual(json.loads(items[-1]["arg"]), self.action)
+            self.assertEqual(json.loads(items[-1]["arg"]), dict(self.action, mode="cloud", mode_revision=""))
             client.assert_not_called()
 
     def test_execution_rechecks_exact_endpoint_and_sends_once_without_fallback(self):
-        with patch.object(self.store, "mobile_client", return_value=self.mobile), patch("mobile_backend.dialog", return_value=""):
+        with patch.object(self.store, "cloud_client", return_value=self.mobile), patch("cloud_backend.dialog", return_value=""):
             message = command.execute(self.action, self.store)
         self.assertEqual(message, "Requesting Entry Lock to unlock.")
         self.mobile.matter_details.assert_called_once_with("example-device")
@@ -90,29 +90,29 @@ class MobileBackendTest(unittest.TestCase):
 
     def test_no_device_password_metadata_skips_the_password_dialog(self):
         self.device["pwd_state"] = 0
-        with patch.object(self.store, "mobile_client", return_value=self.mobile), patch("mobile_backend.dialog") as prompt:
+        with patch.object(self.store, "cloud_client", return_value=self.mobile), patch("cloud_backend.dialog") as prompt:
             self.store.control(self.device, "unlock")
         prompt.assert_not_called()
         self.mobile.write_lock.assert_called_once_with("example-device", "7.148.35011.0", "")
 
     def test_changed_capabilities_or_wrong_home_never_write(self):
         self.mobile.matter_details.return_value = detail(ep=8)
-        with patch.object(self.store, "mobile_client", return_value=self.mobile), patch("mobile_backend.dialog") as prompt:
+        with patch.object(self.store, "cloud_client", return_value=self.mobile), patch("cloud_backend.dialog") as prompt:
             with self.assertRaises(AqaraError):
                 command.execute(self.action, self.store)
             self.mobile.write_lock.assert_not_called()
             prompt.assert_not_called()
-        with patch.object(self.store, "mobile_client") as client:
+        with patch.object(self.store, "cloud_client") as client:
             with self.assertRaises(AqaraError):
                 command.execute(dict(self.action, home_id="old-home"), self.store)
             client.assert_not_called()
 
     def test_cancel_rejection_and_timeout_never_retry_or_fallback(self):
-        for password, error in [(None, None), ("example-password", MobileAPIError("safe", 1703)),
-                                ("", MobileAPIError("timeout"))]:
+        for password, error in [(None, None), ("example-password", CloudAPIError("safe", 1703)),
+                                ("", CloudAPIError("timeout"))]:
             self.mobile.reset_mock()
             self.mobile.write_lock.side_effect = error
-            with patch.object(self.store, "mobile_client", return_value=self.mobile), patch.object(self.store, "client") as agent, patch("mobile_backend.dialog", return_value=password):
+            with patch.object(self.store, "cloud_client", return_value=self.mobile), patch.object(self.store, "client") as agent, patch("cloud_backend.dialog", return_value=password):
                 with self.assertRaises(AqaraError):
                     command.execute(self.action, self.store)
                 self.assertEqual(self.mobile.write_lock.call_count, 0 if password is None else 1)
@@ -121,7 +121,7 @@ class MobileBackendTest(unittest.TestCase):
     def test_resource_status_is_a_subtitle_without_raw_identifiers(self):
         self.mobile.matter_status.return_value = [{"subjectId": "example-device", "resourceId": "7.148.32970.1", "value": "1"},
                                                 {"resourceId": "7.148.32971.1", "value": "1"}]
-        with patch.object(self.store, "mobile_client", return_value=self.mobile):
+        with patch.object(self.store, "cloud_client", return_value=self.mobile):
             result = build_items("Entry Lock status", self.store, self.updater)
             again = build_items("Entry Lock status", self.store, self.updater)
         self.assertEqual(result[0]["title"], "Entry Lock")
@@ -140,7 +140,7 @@ class MobileBackendTest(unittest.TestCase):
                    "scenes": normalize([{"scene_id": "example-scene", "name": "Example Scene One"}], "scenes")}
         source.write("catalog", catalog)
         before = (source.directory / "settings.json").read_bytes()
-        empty = MobileStore(Path(self.temp.name) / "import", keychain_factory=self.factory)
+        empty = CloudStore(Path(self.temp.name) / "import", keychain_factory=self.factory)
         empty.import_agent(source)
         self.assertEqual(empty.read("catalog"), catalog)
         self.assertTrue(empty.read("settings")["showstatus"])
@@ -167,25 +167,25 @@ class MobileBackendTest(unittest.TestCase):
         self.mobile.catalog.side_effect = [[{"homeId": "example-home", "homeName": "Example Home"}],
                                          [{"did": "example-device", "deviceName": "Entry Lock", "model": "example-model"}],
                                          [{"sceneId": "native-scene", "name": "Example Scene Two"}]]
-        with patch.object(self.store, "client", return_value=agent), patch.object(self.store, "mobile_client", return_value=self.mobile):
+        with patch.object(self.store, "client", return_value=agent), patch.object(self.store, "cloud_client", return_value=self.mobile):
             self.store.refresh()
         catalog = self.store.read("catalog")
         self.assertEqual({d["id"] for d in catalog["devices"]}, {"agent-lock", "agent-light", "mobile:example-device#7"})
-        self.assertEqual(next(d for d in catalog["devices"] if d.get("backend") == "mobile")["name"], "Entry Lock (Mobile)")
+        self.assertEqual(next(d for d in catalog["devices"] if d.get("backend") == "mobile")["name"], "Entry Lock (Cloud)")
         self.assertEqual({s["id"] for s in catalog["scenes"]}, {"agent-scene", "mobile:native-scene"})
         agent_lock = next(d for d in catalog["devices"] if d["id"] == "agent-lock")
         self.assertNotIn("unlock", controls(agent_lock))
 
     def test_multiple_accounts_and_home_rollback_use_same_mobile_store(self):
         target = self.store.add_profile("Second region", "{}")
-        self.assertIsInstance(target, MobileStore)
+        self.assertIsInstance(target, CloudStore)
         self.assertNotEqual(target.profile_id, self.store.profile_id)
         self.assertIsNot(target.keychain, self.store.keychain)
         settings = self.store.read("settings")
         settings["homes"].append({"id": "second-home", "name": "Second Home"})
         self.store.write("settings", settings)
         original = self.store.read("catalog")
-        with patch.object(self.store, "refresh", side_effect=MobileAPIError("unavailable")):
+        with patch.object(self.store, "refresh", side_effect=CloudAPIError("unavailable")):
             with self.assertRaises(AqaraError):
                 self.store.switch_home("second-home")
         self.assertEqual(self.store.read("catalog"), original)
@@ -198,11 +198,11 @@ class MobileBackendTest(unittest.TestCase):
                                     [{"endpoint_id": "example-subject", "device_name": "Desk Light", "device_type": "DimmableLight"}], []]
         self.mobile.catalog.side_effect = [[{"homeId": "example-home", "homeName": "Example Home"}],
                                           [{"did": "example-native-device", "deviceName": "Desk Light"}], []]
-        self.mobile.matter_details.side_effect = MobileAPIError("not Matter", 7167)
+        self.mobile.matter_details.side_effect = CloudAPIError("not Matter", 7167)
         self.mobile.panels.return_value = [{"subjects": [{"deviceId": "example-native-device", "endpointId": 2,
              "subjectKey": "example-subject", "paths": ["2.132.32920"]}]}]
         self.mobile.traits.return_value = [{"deviceId": "example-native-device", "traits": [{"path": "2.132.32920", "value": "1"}]}]
-        with patch.object(self.store, "client", return_value=agent), patch.object(self.store, "mobile_client", return_value=self.mobile):
+        with patch.object(self.store, "client", return_value=agent), patch.object(self.store, "cloud_client", return_value=self.mobile):
             self.store.refresh()
         devices = self.store.read("catalog")["devices"]
         self.assertEqual(len(devices), 1)
@@ -210,7 +210,7 @@ class MobileBackendTest(unittest.TestCase):
         self.assertEqual(device["id"], "example-subject")
         self.assertEqual(device["did"], "example-native-device")
         self.assertEqual(set(controls(device)), {"status", "on", "off", "dim", "color", "ct"})
-        with patch.object(self.store, "mobile_client", return_value=self.mobile):
+        with patch.object(self.store, "cloud_client", return_value=self.mobile):
             items = build_items("Desk Light status", self.store, self.updater)
         self.assertEqual(items[0]["subtitle"], "Power: On")
 
@@ -219,7 +219,7 @@ class MobileBackendTest(unittest.TestCase):
         agent = Mock()
         agent.request.return_value = [{"home_id": "example-home", "home_name": "Example Home"}]
         self.mobile.catalog.return_value = [{"homeId": "native-home", "homeName": "Example Home"}]
-        with patch.object(self.store, "client", return_value=agent), patch.object(self.store, "mobile_client", return_value=self.mobile):
+        with patch.object(self.store, "client", return_value=agent), patch.object(self.store, "cloud_client", return_value=self.mobile):
             self.assertEqual(len(self.store.discover_homes()), 2)
             items = build_items("home link", self.store, self.updater)
             action = json.loads(items[0]["arg"])
@@ -239,12 +239,12 @@ class MobileBackendTest(unittest.TestCase):
     def test_native_command_rechecks_model_home_and_home_link_before_writing(self):
         self.device["model"] = "example.lock"
         self.mobile.details.return_value = [{"did": "example-device", "model": "example.lock", "homeId": "example-home"}]
-        with patch.object(self.store, "mobile_client", return_value=self.mobile), patch("mobile_backend.dialog", return_value=""):
+        with patch.object(self.store, "cloud_client", return_value=self.mobile), patch("cloud_backend.dialog", return_value=""):
             self.store.control(self.device, "lock")
         self.mobile.write_lock.assert_called_once_with("example-device", "7.148.35010.0", "")
         self.mobile.reset_mock()
         self.mobile.details.return_value[0]["homeId"] = "other-home"
-        with patch.object(self.store, "mobile_client", return_value=self.mobile), self.assertRaises(AqaraError):
+        with patch.object(self.store, "cloud_client", return_value=self.mobile), self.assertRaises(AqaraError):
             self.store.control(self.device, "lock")
         self.mobile.write_lock.assert_not_called()
         self.mobile.details.return_value[0]["homeId"] = "example-home"
@@ -253,14 +253,14 @@ class MobileBackendTest(unittest.TestCase):
             settings["home_links"] = {"example-home": "other-home"}
             self.store.write("settings", settings)
             return ""
-        with patch.object(self.store, "mobile_client", return_value=self.mobile), patch("mobile_backend.dialog", side_effect=relink), self.assertRaises(AqaraError):
+        with patch.object(self.store, "cloud_client", return_value=self.mobile), patch("cloud_backend.dialog", side_effect=relink), self.assertRaises(AqaraError):
             self.store.control(self.device, "unlock")
         self.mobile.write_lock.assert_not_called()
 
     def test_reconnection_failure_keeps_credentials_and_current_catalog(self):
         self.values["default"] = json.dumps({"agent_key": "old-example-key"})
         old = self.store.read("catalog")
-        with patch.object(self.store, "discover_homes", side_effect=MobileAPIError("unavailable")):
+        with patch.object(self.store, "discover_homes", side_effect=CloudAPIError("unavailable")):
             with self.assertRaises(AqaraError):
                 self.store.replace_connection({"agent_key": "new-example-key"})
         self.assertEqual(self.store.secrets(), {"agent_key": "old-example-key"})
@@ -271,7 +271,7 @@ class MobileBackendTest(unittest.TestCase):
             self.store.write("settings", {"home_id": "other-home"})
             return detail()
         self.mobile.matter_details.side_effect = switch
-        with patch.object(self.store, "mobile_client", return_value=self.mobile), patch("mobile_backend.dialog", return_value=""):
+        with patch.object(self.store, "cloud_client", return_value=self.mobile), patch("cloud_backend.dialog", return_value=""):
             with self.assertRaises(AqaraError):
                 command.execute(self.action, self.store)
         self.mobile.write_lock.assert_not_called()
@@ -280,19 +280,19 @@ class MobileBackendTest(unittest.TestCase):
         def switch(*args, **kwargs):
             self.store.write("settings", {"home_id": "other-home"})
             return ""
-        with patch.object(self.store, "mobile_client", return_value=self.mobile), patch("mobile_backend.dialog", side_effect=switch):
+        with patch.object(self.store, "cloud_client", return_value=self.mobile), patch("cloud_backend.dialog", side_effect=switch):
             with self.assertRaises(AqaraError):
                 command.execute(self.action, self.store)
         self.mobile.write_lock.assert_not_called()
 
     def test_native_scene_uses_exact_app_request_without_retry(self):
         self.mobile.user_id = "example-user"
-        with patch.object(self.store, "mobile_client", return_value=self.mobile):
+        with patch.object(self.store, "cloud_client", return_value=self.mobile):
             self.store.run_scene({"backend": "mobile", "scene_id": "example-scene"})
         self.mobile._call.assert_called_once_with("POST", "/ifttt/scene/run", {"sceneId": "example-scene", "userId": "example-user"})
 
 
-class MobileTransportAndPackageTest(unittest.TestCase):
+class CloudTransportAndPackageTest(unittest.TestCase):
     def client(self):
         identity = AppIdentity("exampleappid0000", "example_application_key", (1 << 2048) - 159)
         opener = Mock()
@@ -340,33 +340,33 @@ class MobileTransportAndPackageTest(unittest.TestCase):
         self.assertEqual(readings([{"attr": "lock_state", "value": '{"private-field":"private-value"}'}]),
                          {"Status": "No readable status values returned"})
 
-    def test_mobile_package_identity_allowlist_and_stable_source_are_isolated(self):
+    def test_single_package_includes_both_modes_and_cloud_help(self):
         root = Path(__file__).resolve().parents[1]
         original = (root / "info.plist").read_bytes()
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "mobile.alfredworkflow"
-            subprocess.run([sys.executable, "workflow-build", "--mobile", str(output)], cwd=root, check=True, capture_output=True)
+            subprocess.run([sys.executable, "workflow-build", str(output)], cwd=root, check=True, capture_output=True)
             with ZipFile(output) as archive:
                 info = plistlib.loads(archive.read("info.plist"))
-                self.assertEqual(info["bundleid"], "com.schwark.aqara.mobile")
-                self.assertEqual(info["variables"]["keyword"], "aqm")
-                self.assertEqual(info["variables"]["AQARA_BACKEND"], "mobile")
+                self.assertEqual(info["bundleid"], "com.schwark.aqara")
+                self.assertEqual(info["variables"]["keyword"], "aq")
+                self.assertNotIn("AQARA_BACKEND", info["variables"])
+                self.assertEqual(archive.read("README-cloud.md"), (root / "README-cloud.md").read_bytes())
+                self.assertIn("aq mode cloud", info["readme"])
                 self.assertEqual(info["version"], archive.read("version").decode().strip())
-                self.assertIn("mobile_backend.py", archive.namelist())
+                self.assertIn("cloud_backend.py", archive.namelist())
                 self.assertIn("runtime.py", archive.namelist())
                 self.assertFalse(any(name.startswith(("tools/", ".cache/", "tests/")) or name.endswith(".json") for name in archive.namelist()))
                 self.assertIn("cloud_capabilities.py", archive.namelist())
-                self.assertEqual(len(archive.namelist()), 23)
+                self.assertEqual(len(archive.namelist()), 24)
         self.assertEqual((root / "info.plist").read_bytes(), original)
 
-    def test_update_channels_cannot_cross_install_variants(self):
+    def test_updater_ignores_earlier_parallel_packages(self):
         from workflow.update import Download
-        mobile = Download("https://example.invalid", "Aqara-Mobile-0.3.0-mobile.2.alfredworkflow", "0.3.0-mobile.2", True)
+        legacy = Download("https://example.invalid", "Aqara-Mobile-9.0.0.alfredworkflow", "9.0.0", True)
+        cloud = Download("https://example.invalid", "Aqara-Cloud-8.0.0.alfredworkflow", "8.0.0", True)
         stable = Download("https://example.invalid", "Aqara-5.0.0.alfredworkflow", "5.0.0")
-        with patch("updater.BUNDLE_ID", "com.schwark.aqara.mobile"):
-            self.assertIs(update.latest_download([stable, mobile], "5.8", prereleases=True), mobile)
-        with patch("updater.BUNDLE_ID", "com.schwark.aqara"):
-            self.assertIs(update.latest_download([stable, mobile], "5.8", prereleases=True), stable)
+        self.assertIs(update.latest_download([stable, legacy, cloud], "5.8", prereleases=True), stable)
 
 
 if __name__ == "__main__":

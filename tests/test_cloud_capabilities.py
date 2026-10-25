@@ -9,8 +9,8 @@ from unittest.mock import Mock, patch
 
 from cloud_capabilities import compile_traits, definition_endpoints, panel_endpoints, trait_rows, trait_status, validate_control
 from common import AqaraError, control_body, controls
-from mobile_backend import BackendClient, MobileStore, TRAIT_WRITE, capabilities
-from mobile_transport import AppIdentity, MobileAPIError, MobileClient
+from cloud_backend import BackendClient, CloudStore, TRAIT_WRITE, capabilities
+from cloud_transport import AppIdentity, CloudAPIError, CloudClient
 from tools.cloud_probe import inspect_device, inspect_profile, save_evidence
 
 
@@ -77,7 +77,7 @@ class CloudCapabilityTest(unittest.TestCase):
 
     def test_zigbee_discovery_does_not_depend_on_matter(self):
         client = self.client()
-        with patch.object(client, "panels", return_value=panel()), patch.object(client, "traits", return_value=metadata()), patch.object(client, "matter_details", side_effect=MobileAPIError("not supported", 7167)):
+        with patch.object(client, "panels", return_value=panel()), patch.object(client, "traits", return_value=metadata()), patch.object(client, "matter_details", side_effect=CloudAPIError("not supported", 7167)):
             endpoints, failures = client.endpoint_capabilities("example-device")
         self.assertEqual(failures, 1)
         self.assertEqual(set(endpoints[0]["cloud_controls"]), {"on", "off", "dim", "ct"})
@@ -101,7 +101,7 @@ class CloudCapabilityTest(unittest.TestCase):
                                 {"traitId": 35010, "traitType": 1}, {"traitId": 35011, "traitType": 1}]}]}]}]}
         self.assertEqual(definition_endpoints(definitions, "unrecognized"), [])
         client = self.client()
-        with patch.object(client, "definitions", return_value=definitions) as download, patch.object(client, "panels", return_value=[]), patch.object(client, "matter_details", side_effect=MobileAPIError("not Matter", 7167)), patch.object(client, "traits", return_value=[]) as read:
+        with patch.object(client, "definitions", return_value=definitions) as download, patch.object(client, "panels", return_value=[]), patch.object(client, "matter_details", side_effect=CloudAPIError("not Matter", 7167)), patch.object(client, "traits", return_value=[]) as read:
             endpoints, _ = client.endpoint_capabilities("example-device", "example.lock")
             self.assertEqual(endpoints[0]["commands"], {})
             read.return_value = [{"deviceId": "example-device", "traits": [{"path": "2.148.32970", "value": "1"}]}]
@@ -118,15 +118,15 @@ class CloudCapabilityTest(unittest.TestCase):
         config = {"url": "https://aiot-example.s3.us-west-2.amazonaws.com/definitions.gzip", "md5": hashlib.md5(raw).hexdigest()}
         opener = Mock()
         opener.open.return_value = io.BytesIO(raw)
-        with patch.object(client, "_call", return_value=config), patch("mobile_transport.build_opener", return_value=opener):
+        with patch.object(client, "_call", return_value=config), patch("cloud_transport.build_opener", return_value=opener):
             self.assertEqual(client.definitions(), {"configs": []})
         request = opener.open.call_args[0][0]
         self.assertFalse(request.header_items())
         for url in ("http://aiot-example.s3.us-west-2.amazonaws.com/x", "https://example.invalid/x", "https://user:password@aiot-example.s3.us-west-2.amazonaws.com/x"):
-            with patch.object(client, "_call", return_value=dict(config, url=url)), self.assertRaises(MobileAPIError):
+            with patch.object(client, "_call", return_value=dict(config, url=url)), self.assertRaises(CloudAPIError):
                 client.definitions()
         opener.open.return_value = io.BytesIO(raw + b"changed")
-        with patch.object(client, "_call", return_value=config), patch("mobile_transport.build_opener", return_value=opener), self.assertRaises(MobileAPIError):
+        with patch.object(client, "_call", return_value=config), patch("cloud_transport.build_opener", return_value=opener), self.assertRaises(CloudAPIError):
             client.definitions()
 
     def test_semantic_enum_mapping_and_read_only_permissions_are_respected(self):
@@ -151,7 +151,7 @@ class CloudCapabilityTest(unittest.TestCase):
 
     def test_hybrid_endpoint_keeps_all_agent_commands_and_selects_route_before_write(self):
         client = self.client()
-        with patch.object(client, "panels", return_value=panel()), patch.object(client, "traits", return_value=metadata()), patch.object(client, "matter_details", side_effect=MobileAPIError("not supported")):
+        with patch.object(client, "panels", return_value=panel()), patch.object(client, "traits", return_value=metadata()), patch.object(client, "matter_details", side_effect=CloudAPIError("not supported")):
             cap = client.endpoint_capabilities("example-device")[0][0]
         device = {"id": "example-endpoint", "did": "example-device", "endpoint": "2", "backend": "mobile", "type": "DimmableLight",
                   "cloud_controls": cap["cloud_controls"], "agent_fallback": {"id": "example-endpoint", "type": "DimmableLight"}}
@@ -161,16 +161,16 @@ class CloudCapabilityTest(unittest.TestCase):
         self.assertEqual(control_body(device, "dim", "100")["attribute"], "brightness")
         self.assertEqual(control_body(device, "dim", "50")["attribute"], "native_trait")
         with tempfile.TemporaryDirectory() as directory:
-            store = MobileStore(Path(directory), keychain_factory=lambda identifier: Mock())
+            store = CloudStore(Path(directory), keychain_factory=lambda identifier: Mock())
             store.write("settings", {"home_id": "example-home"})
             agent, mobile = Mock(), Mock()
             mobile.endpoint_capabilities.return_value = ([cap], 0)
-            with patch.object(store, "client", return_value=agent), patch.object(store, "mobile_client", return_value=mobile):
+            with patch.object(store, "client", return_value=agent), patch.object(store, "cloud_client", return_value=mobile):
                 store.control(device, "color", "red")
                 agent.request.assert_called_once()
                 mobile.write_trait.assert_not_called()
-                mobile.write_trait.side_effect = MobileAPIError("timeout")
-                with self.assertRaises(MobileAPIError):
+                mobile.write_trait.side_effect = CloudAPIError("timeout")
+                with self.assertRaises(CloudAPIError):
                     store.control(device, "dim", "50")
                 mobile.write_trait.assert_called_once()
                 self.assertEqual(agent.request.call_count, 1)
@@ -178,7 +178,7 @@ class CloudCapabilityTest(unittest.TestCase):
     def test_probe_is_read_only_and_keeps_evidence_out_of_the_repository(self):
         client = Mock()
         client.panels.return_value = panel()
-        client.matter_details.side_effect = MobileAPIError("private-server-data", 7167)
+        client.matter_details.side_effect = CloudAPIError("private-server-data", 7167)
         client.details.return_value = {"token": "private-token", "did": "example-device"}
         client.traits.return_value = metadata()
         result = inspect_device(client, {"did": "example-device"})
@@ -187,7 +187,7 @@ class CloudCapabilityTest(unittest.TestCase):
         store = Mock()
         store.secrets.return_value = {"agent_key": "example-agent-key"}
         self.assertEqual(inspect_profile(store)[1], {"status": "sign_in_required"})
-        store.mobile_client.assert_not_called()
+        store.cloud_client.assert_not_called()
         with tempfile.TemporaryDirectory() as directory, patch("tools.cloud_probe.PRIVATE_ROOT", Path(directory)):
             destination = Path(directory) / "private/evidence.json"
             save_evidence(destination, result)
@@ -197,7 +197,7 @@ class CloudCapabilityTest(unittest.TestCase):
                 save_evidence(Path(__file__).resolve().parents[1] / "forbidden-evidence.json", result)
 
     def test_bridge_queries_do_not_allow_bind_unbind_or_device_writes(self):
-        client = MobileClient(self.client().identity, "US", "US")
+        client = CloudClient(self.client().identity, "US", "US")
         with patch.object(client, "_call") as call:
             client.gateway_details("example-hub")
             client.bridge_gateways("example-device", "example-home")
@@ -207,14 +207,14 @@ class CloudCapabilityTest(unittest.TestCase):
             ("POST", "/app/dev/matter/bridge", {"deviceId": "example-device", "positionId": "example-home"}),
             ("POST", "/app/dev/matter/bridge/subdevice", {"positionId": "example-home", "gatewayId": "example-hub"})])
         for path in ("/app/dev/matter/bridge/subdevice/bind", "/app/dev/matter/bridge/unbind/by-device", "/matter/write"):
-            with self.assertRaises(MobileAPIError):
+            with self.assertRaises(CloudAPIError):
                 client._call("POST", path, {})
 
     def test_bridge_evidence_follows_returned_gateway_relationships_only(self):
         store, client = Mock(), Mock()
         store.secrets.return_value = {"token": "example-token"}
         store.profile_id = "example-profile"
-        store.mobile_client.return_value = client
+        store.cloud_client.return_value = client
         client.catalog.side_effect = [[{"homeId": "example-home"}], [{"did": "example-device", "parentDeviceId": "example-hub"}]]
         client.specification.return_value = {}
         client.definitions.return_value = {"configs": []}

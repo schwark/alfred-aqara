@@ -8,7 +8,7 @@ import sys
 from common import AqaraError, Client, LOGIN_URL, Store, control_body, normalize, selector
 from keychain import KeychainError
 from updater import Updater
-from runtime import get_store
+from runtime import get_store, set_mode, validate_action
 
 
 def prompt_key():
@@ -30,18 +30,22 @@ def prompt_profile_name():
 
 
 def execute(action, store=None):
+    if action.get("action") == "mode":
+        directory = getattr(store, "workflow_root", store.root) if store is not None else None
+        return set_mode(action.get("value"), directory)
     store = store or get_store()
-    if getattr(store, "is_mobile", False):
+    validate_action(action, store)
+    if getattr(store, "is_cloud", False):
         result = store.handle_action(action)
         if result is not None:
             return result
     name = action.get("action")
     if name == "workflow_update":
-        return Updater(store.root).install()
+        return Updater(getattr(store, "workflow_root", store.root)).install()
     if name == "workflow_autoupdate":
         if type(action.get("enabled")) is not bool:
             raise AqaraError("Choose whether to enable automatic update checks.")
-        updater = Updater(store.root)
+        updater = Updater(getattr(store, "workflow_root", store.root))
         updater.set_enabled(action["enabled"])
         if action["enabled"]:
             updater.schedule()
@@ -113,7 +117,7 @@ def execute(action, store=None):
             target.clear_catalog()
             (target.directory / "settings.json").unlink(missing_ok=True)
         (store.root / "accounts.json").unlink(missing_ok=True)
-        return "Aqara workflow reset."
+        return store.mode.title() + " mode reset."
     if name == "showstatus":
         if action.get("value") not in ("on", "off"):
             raise AqaraError("Choose showstatus on or off.")

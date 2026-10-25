@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 
-from tools.mobile_api import AppIdentity, MobileAPIError, MobileClient, NoRedirects, encrypt_password, signature
+from tools.mobile_api import AppIdentity, CloudAPIError, CloudClient, NoRedirects, encrypt_password, signature
 
 
 class MobileAPITest(unittest.TestCase):
@@ -18,7 +18,7 @@ class MobileAPITest(unittest.TestCase):
         self.identity = AppIdentity('exampleappid0000', 'example_application_key', p * q)
         self.private_exponent = pow(65537, -1, (p - 1) * (q - 1))
         self.opener = Mock()
-        self.client = MobileClient(self.identity, 'US', 'US', self.opener)
+        self.client = CloudClient(self.identity, 'US', 'US', self.opener)
 
     def response(self, data):
         self.opener.open.return_value = io.BytesIO(json.dumps(data).encode())
@@ -43,7 +43,7 @@ class MobileAPITest(unittest.TestCase):
             path.write_text("raise RuntimeError('must never execute')\nAPPID='exampleappid0000'\nAPPKEY='example_application_key'\nRSA_N=int('" + format(self.identity.modulus, 'x') + "',16)\nRSA_E=65537\n")
             self.assertEqual(AppIdentity.from_reference(path).modulus, self.identity.modulus)
             path.write_text("APPID=__import__('os').getenv('HOME')")
-            with self.assertRaises(MobileAPIError):
+            with self.assertRaises(CloudAPIError):
                 AppIdentity.from_reference(path)
 
     def test_sign_in_keeps_password_out_of_headers_and_diagnostics(self):
@@ -56,7 +56,7 @@ class MobileAPITest(unittest.TestCase):
         self.assertNotIn('example-password', str(request.header_items()))
         self.assertEqual(json.loads(request.data)['district'], 'US')
         self.response({'code': 810, 'message': 'private-account-or-password'})
-        with self.assertRaises(MobileAPIError) as caught:
+        with self.assertRaises(CloudAPIError) as caught:
             self.client.login('example@example.invalid', 'example-password')
         self.assertEqual(caught.exception.code, 810)
         self.assertNotIn('private-account-or-password', str(caught.exception))
@@ -76,11 +76,11 @@ class MobileAPITest(unittest.TestCase):
         self.client.token = 'example-token'
         for method, path in [('POST', '/matter/write'), ('GET', '/dev/lock/query'),
                              ('POST', '/dev/lock/user/add'), ('POST', '/devex/lock/pwd')]:
-            with self.subTest(path=path), self.assertRaises(MobileAPIError):
+            with self.subTest(path=path), self.assertRaises(CloudAPIError):
                 self.client._call(method, path, {})
         self.opener.open.assert_not_called()
-        with self.assertRaises(MobileAPIError):
-            MobileClient(self.identity, 'https://example.invalid', 'US')
+        with self.assertRaises(CloudAPIError):
+            CloudClient(self.identity, 'https://example.invalid', 'US')
 
     def test_get_query_signing_is_canonical_regardless_of_caller_field_order(self):
         self.client.token = 'example-token'
@@ -118,16 +118,16 @@ class MobileAPITest(unittest.TestCase):
         self.assertEqual(json.loads(request.data), {'devices': [{'deviceId': 'example-device', 'traits': [
             {'path': '2.148.32970', 'needSubscribe': False}, {'path': '2.148.33026', 'needSubscribe': False}]}], 'needParam': True})
         for paths in ([], ['2.148.32970.1'], ['arbitrary']):
-            with self.assertRaises(MobileAPIError):
+            with self.assertRaises(CloudAPIError):
                 self.client.traits('example-device', paths)
 
     def test_no_session_prevents_network_and_missing_user_id_rejects_session(self):
-        with self.assertRaises(MobileAPIError):
+        with self.assertRaises(CloudAPIError):
             self.client.homes()
         self.opener.open.assert_not_called()
         for user_info in (None, 'unexpected'):
             self.response({'code': 0, 'result': {'token': 'example-token', 'userInfo': user_info}})
-            with self.assertRaises(MobileAPIError):
+            with self.assertRaises(CloudAPIError):
                 self.client.login('example@example.invalid', 'example-password')
             self.assertEqual(self.client.token, '')
 
@@ -135,13 +135,13 @@ class MobileAPITest(unittest.TestCase):
         self.client.token = 'example-token'
         for error in [HTTPError('https://example.invalid', 302, 'private', {}, io.BytesIO(b'private')), URLError('private')]:
             self.opener.open.side_effect = error
-            with self.subTest(error=type(error)), self.assertRaises(MobileAPIError) as caught:
+            with self.subTest(error=type(error)), self.assertRaises(CloudAPIError) as caught:
                 self.client.homes()
             self.assertNotIn('private', str(caught.exception))
         self.opener.open.side_effect = None
         for raw in [b'not JSON private', b'x' * (4 * 1024 * 1024 + 1), b'[]', b'{}']:
             self.opener.open.return_value = io.BytesIO(raw)
-            with self.subTest(size=len(raw)), self.assertRaises(MobileAPIError):
+            with self.subTest(size=len(raw)), self.assertRaises(CloudAPIError):
                 self.client.homes()
 
     def test_redirects_do_not_forward_a_session(self):

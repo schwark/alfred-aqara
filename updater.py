@@ -29,15 +29,14 @@ CACHE_ERRORS = (OSError, ValueError, TypeError, KeyError, EOFError, pickle.Unpic
 def correct_variant(filename):
     if not isinstance(filename, str):
         return False
-    mobile = BUNDLE_ID.endswith(".mobile")
-    return filename.startswith("Aqara-Mobile-") if mobile else filename.startswith("Aqara-") and not filename.startswith("Aqara-Mobile-")
+    return bool(re.fullmatch(r"Aqara-\d[^/]*\.alfred(?:\d+)?workflow", filename))
 
 
 class Updater:
     def __init__(self, directory, current_version=None):
         self.version = current_version or Path(__file__).with_name("version").read_text().strip()
         self.directory = Path(directory) / "workflow-updates"
-        self.workflow = Workflow(update_settings={"github_slug": REPOSITORY, "version": self.version, "frequency": 1, "prereleases": BUNDLE_ID.endswith(".mobile")}, capture_args=False)
+        self.workflow = Workflow(update_settings={"github_slug": REPOSITORY, "version": self.version, "frequency": 1, "prereleases": False}, capture_args=False)
         # The framework owns its settings.json; Aqara owns a different settings.json.
         self.workflow.alfred_env.update(workflow_data=str(self.directory / "data"),
                                         workflow_cache=str(self.directory / "cache"),
@@ -121,7 +120,7 @@ def verified_download(download, directory=None, opener=None):
     """Alfred-Workflow download hook: verify GitHub's checksum before importing."""
     version = str(download.version)
     filename = download.filename
-    prefix = "Aqara-Mobile-" if BUNDLE_ID.endswith(".mobile") else "Aqara-"
+    prefix = "Aqara-"
     if not re.fullmatch(re.escape(prefix) + re.escape(version) + r"\.alfred(?:\d+)?workflow", filename):
         raise AqaraError("The release asset is not an Aqara workflow.")
     url = urlsplit(download.url)

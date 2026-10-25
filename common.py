@@ -14,7 +14,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from keychain import Keychain, KeychainError
 
-BUNDLE_ID = "com.schwark.aqara" + (".mobile" if os.environ.get("AQARA_BACKEND") == "mobile" else "")
+BUNDLE_ID = "com.schwark.aqara"
 API_URL = "https://agent.aqara.com/open/api"
 LOGIN_URL = "https://agent.aqara.com/login"
 SUCCESS_CODES = (0, 200, "0", "200", "OK", "SUCCESS", "success", None)
@@ -203,6 +203,8 @@ def normalize(payload, kind):
 
 
 class Store:
+    mode = "agent"
+
     def __init__(self, directory=None, keychain=None, profile_id=None, keychain_factory=None):
         fallback = Path.home() / "Library/Application Support/Alfred/Workflow Data" / BUNDLE_ID
         self.root = Path(directory or os.environ.get("alfred_workflow_data") or fallback)
@@ -255,7 +257,16 @@ class Store:
         return self._read_path(self.root / "accounts.json").get("active_id", "default")
 
     def for_profile(self, identifier):
-        return type(self)(self.root, profile_id=identifier, keychain_factory=self.keychain_factory)
+        target = type(self)(self.root, profile_id=identifier, keychain_factory=self.keychain_factory)
+        for name in ("workflow_root", "mode_revision", "mode_guard"):
+            if hasattr(self, name):
+                setattr(target, name, getattr(self, name))
+        return target
+
+    def ensure_current_mode(self):
+        guard = getattr(self, "mode_guard", None)
+        if guard:
+            guard()
 
     def activate(self):
         self._write_path(self.root / "accounts.json", {"active_id": self.profile_id, "profiles": self.profiles()})
@@ -377,11 +388,15 @@ class Store:
 
     def control(self, device, command, value=""):
         body = control_body(device, command, value)
-        self.client().request("device/control", body)
+        client = self.client()
+        self.ensure_current_mode()
+        client.request("device/control", body)
         return body
 
     def run_scene(self, scene):
-        self.client().request("scene/run", {"scene_ids": [scene["id"]]})
+        client = self.client()
+        self.ensure_current_mode()
+        client.request("scene/run", {"scene_ids": [scene["id"]]})
 
     def status(self, device, client=None):
         cache = self.read("status")

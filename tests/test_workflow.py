@@ -57,7 +57,7 @@ class WorkflowTest(unittest.TestCase):
         result = build_items("Desk Light dim 42", self.store)
         self.assertEqual(len(result), 1)
         action = json.loads(result[0]["arg"])
-        self.assertEqual(action, {"action": "control", "profile_id": "default", "home_id": "home-1", "id": "light-1", "command": "dim", "value": "42"})
+        self.assertEqual(action, {"action": "control", "profile_id": "default", "home_id": "home-1", "id": "light-1", "command": "dim", "value": "42", "mode": "agent", "mode_revision": ""})
         self.assertFalse(build_items("Desk Light dim 101", self.store)[0]["valid"])
         self.assertFalse(build_items("Desk Light on extra", self.store)[0]["valid"])
 
@@ -691,7 +691,7 @@ class PackageTest(unittest.TestCase):
             with ZipFile(archive) as package:
                 self.assertEqual(set(package.namelist()), {
                     "info.plist", "icon.png", "workflow.sh", "filter.py", "command.py", "common.py", "keychain.py",
-                    "updater.py", "runtime.py", "README.md", "LICENSE", "version", "workflow/__init__.py", "workflow/workflow.py",
+                    "updater.py", "runtime.py", "README.md", "README-cloud.md", "cloud_backend.py", "cloud_transport.py", "cloud_capabilities.py", "LICENSE", "version", "workflow/__init__.py", "workflow/workflow.py",
                     "workflow/util.py", "workflow/web.py", "workflow/update.py", "workflow/background.py", "workflow/version", "workflow/LICENSE"})
                 plistlib.loads(package.read("info.plist"))
                 self.assertEqual(package.getinfo("workflow.sh").external_attr >> 16 & 0o777, 0o755)

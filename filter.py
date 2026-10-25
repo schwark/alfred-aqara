@@ -9,7 +9,7 @@ import sys
 from common import AqaraError, Store, control_body, controls, selector, table_rows
 from keychain import KeychainError
 from updater import Updater
-from runtime import get_store
+from runtime import get_store, mode_state, workflow_root
 
 
 def item(title, subtitle="", action=None, autocomplete=None, uid=None):
@@ -246,9 +246,18 @@ def device_choices(devices, remainder=""):
 
 
 def build_items(query, store=None, updater=None):
-    store = store or get_store()
-    updater = updater or Updater(store.root)
     term = query.strip().casefold()
+    if term.partition(" ")[0] == "mode":
+        root = getattr(store, "workflow_root", store.root) if store is not None else workflow_root()
+        current = mode_state(root)[0]
+        search = term.partition(" ")[2].strip().removesuffix("?").strip()
+        return [item(mode.title() + " mode", "Current mode" if mode == current else subtitle,
+                     {"action": "mode", "value": mode}, "mode " + mode, "mode:" + mode)
+                for mode, subtitle in (("agent", "Use the official Agent API"),
+                                       ("cloud", "Use the Aqara Home cloud API, including supported lock commands"))
+                if mode.startswith(search)] or [item("Choose a mode", "Use aq mode agent or aq mode cloud", autocomplete="mode ")]
+    store = store or get_store()
+    updater = updater or Updater(getattr(store, "workflow_root", store.root))
     commands = [
         ("workflow:update", "Check for an Aqara workflow update", "Download the latest release and open Alfred's upgrade dialog", {"action": "workflow_update"}),
         ("workflow:autoupdate", "Enable automatic update checks", "Check GitHub once a day while using the workflow", {"action": "workflow_autoupdate", "enabled": True}),
@@ -257,18 +266,26 @@ def build_items(query, store=None, updater=None):
     if term == "upgrade":
         term = "workflow:update"
     if term.startswith("workflow:"):
-        return [item(title, subtitle, action, keyword, "update:" + keyword)
+        result = [item(title, subtitle, action, keyword, "update:" + keyword)
                 for keyword, title, subtitle, action in commands if keyword.startswith(term)] or [
                     item("No matching workflow command", "Use aq workflow:update to check for updates", autocomplete="workflow:update")]
-    result = _build_items(query, store)
-    if getattr(store, "is_mobile", False):
-        result = store.decorate_items(query, result)
+    else:
+        result = _build_items(query, store)
+        if getattr(store, "is_cloud", False):
+            result = store.decorate_items(query, result)
+    if not term or "mode".startswith(term):
+        result.append(item("Mode: " + store.mode.title(), "Switch between Agent and Cloud", autocomplete="mode ", uid="mode"))
     if not term:
         result.append(item("Workflow updates", "Check for updates or change automatic checks", autocomplete="workflow:"))
     status = updater.available()
     if status:
         result.insert(0, item("Aqara " + status["version"] + " is available", "Install the update · Confirm the upgrade in Alfred",
                               {"action": "workflow_update"}, "workflow:update", "workflow-update"))
+    for row in result:
+        if "arg" in row:
+            action = json.loads(row["arg"])
+            action.update(mode=store.mode, mode_revision=getattr(store, "mode_revision", ""))
+            row["arg"] = json.dumps(action, ensure_ascii=False)
     return result
 
 
@@ -282,7 +299,7 @@ def _build_items(query, store):
         ("home", "Choose Aqara home", settings.get("home_name", "No home selected"), None),
         ("account", "Manage accounts and regions", store.profile_name(), None),
         ("showstatus", "Show status automatically", "Choose on or off; off keeps browsing fast", None),
-        ("reinit", "Reset Aqara workflow", "Remove all saved accounts, keys, home selections, and catalogs", {"action": "reinit"}),
+        ("reinit", "Reset " + store.mode.title() + " mode", "Remove this mode's saved accounts, credentials, home selections, and catalogs", {"action": "reinit"}),
     ]
     first = query.partition(" ")[0].casefold()
     if first in ("home", "homes"):
@@ -369,10 +386,14 @@ def _build_items(query, store):
 
 def main():
     try:
-        store = get_store()
-        updater = Updater(store.root)
-        updater.schedule()
-        result = build_items(sys.argv[1] if len(sys.argv) > 1 else "", store, updater)
+        query = sys.argv[1] if len(sys.argv) > 1 else ""
+        if query.strip().casefold().partition(" ")[0] == "mode":
+            result = build_items(query)
+        else:
+            store = get_store()
+            updater = Updater(store.workflow_root)
+            updater.schedule()
+            result = build_items(query, store, updater)
     except (AqaraError, KeychainError, OSError) as exc:
         result = [item("Aqara unavailable", str(exc))]
         print("Aqara: " + str(exc), file=sys.stderr)

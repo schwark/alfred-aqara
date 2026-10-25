@@ -1,10 +1,10 @@
-"""Shared signed transport for the experimental Aqara mobile backend.
+"""Shared signed transport for the Aqara Cloud backend.
 
 Wire-format reference: home-assistant-plugins/aquara-local at
 4fc274688cd40774307549172c9ae1db073c92ca (MIT). App constants are loaded from
 that separately obtained reference, never embedded here. Credentials and
 sessions stay in memory. Runtime storage and capability-bound writes are
-implemented separately in mobile_backend.
+implemented separately in cloud_backend.
 """
 
 import ast
@@ -54,7 +54,7 @@ ALLOWED = {("POST", LOGIN), ("GET", HOMES), ("GET", DEVICES),
 MAX_RESPONSE = 4 * 1024 * 1024
 
 
-class MobileAPIError(AqaraError):
+class CloudAPIError(AqaraError):
     """Safe diagnostic with an optional numeric server code, never a response body."""
 
     def __init__(self, message, code=None):
@@ -102,7 +102,7 @@ class AppIdentity:
                 raise ValueError()
             return identity
         except (OSError, ValueError, TypeError, KeyError, SyntaxError):
-            raise MobileAPIError("The mobile app reference constants are missing or invalid.") from None
+            raise CloudAPIError("The Cloud signing reference constants are missing or invalid.") from None
 
 
 def encrypt_password(password, identity):
@@ -110,7 +110,7 @@ def encrypt_password(password, identity):
     width = (identity.modulus.bit_length() + 7) // 8
     padding_length = width - len(message) - 3
     if padding_length < 8:
-        raise MobileAPIError("Invalid mobile app encryption key.")
+        raise CloudAPIError("Invalid Cloud signing encryption key.")
     padding = bytearray()
     while len(padding) < padding_length:
         padding.extend(value for value in secrets.token_bytes(padding_length - len(padding)) if value)
@@ -129,12 +129,12 @@ def signature(identity, nonce, timestamp, token, payload):
     return hashlib.md5("&".join(parts).encode("utf-8")).hexdigest()
 
 
-class MobileClient:
+class CloudClient:
     routes = ALLOWED
 
     def __init__(self, identity, area, district, opener=None):
         if area not in HOSTS or not re.fullmatch(r"[A-Z]{2}", district):
-            raise MobileAPIError("Choose an explicit mobile API area and two-letter district.")
+            raise CloudAPIError("Choose an explicit Cloud API area and two-letter district.")
         self.identity = identity
         self.area, self.district = area, district
         self.opener = opener or build_opener(NoRedirects())
@@ -142,9 +142,9 @@ class MobileClient:
 
     def _call(self, method, path, fields):
         if (method, path) not in self.routes:
-            raise MobileAPIError("This discovery client only permits authentication and read-only queries.")
+            raise CloudAPIError("This discovery client only permits authentication and read-only queries.")
         if path != LOGIN and not self.token:
-            raise MobileAPIError("Sign in to the mobile API before querying devices.")
+            raise CloudAPIError("Sign in to the Cloud API before querying devices.")
         if method == "POST":
             payload = json.dumps(fields, separators=(",", ":"), ensure_ascii=True)
             data, query = payload.encode("utf-8"), ""
@@ -163,19 +163,19 @@ class MobileClient:
             with self.opener.open(request, timeout=20) as response:
                 raw = response.read(MAX_RESPONSE + 1)
             if len(raw) > MAX_RESPONSE:
-                raise MobileAPIError("The mobile API returned an oversized response.")
+                raise CloudAPIError("The Cloud API returned an oversized response.")
             result = json.loads(raw)
         except HTTPError as exc:
             exc.close()
-            raise MobileAPIError("The mobile API rejected the request (HTTP %s)." % exc.code) from None
+            raise CloudAPIError("The Cloud API rejected the request (HTTP %s)." % exc.code) from None
         except (OSError, URLError, ValueError):
-            raise MobileAPIError("The mobile API could not be reached or returned an unreadable response.") from None
+            raise CloudAPIError("The Cloud API could not be reached or returned an unreadable response.") from None
         if not isinstance(result, dict):
-            raise MobileAPIError("The mobile API returned an unexpected response shape.")
+            raise CloudAPIError("The Cloud API returned an unexpected response shape.")
         if result.get("code") != 0:
             value = result.get("code")
             code = value if type(value) is int else None
-            raise MobileAPIError("The mobile API rejected the request" + (" (code %d)." % code if code is not None else "."), code)
+            raise CloudAPIError("The Cloud API rejected the request" + (" (code %d)." % code if code is not None else "."), code)
         return result.get("result", result.get("data"))
 
     def login(self, username, password):
@@ -183,11 +183,11 @@ class MobileClient:
         result = self._call("POST", LOGIN, {"account": username, "district": self.district,
                             "encryptType": 2, "guardCode": "", "password": encrypt_password(password, self.identity)})
         if not isinstance(result, dict) or not isinstance(result.get("token"), str) or not result["token"]:
-            raise MobileAPIError("Mobile sign-in did not return a session.")
+            raise CloudAPIError("Cloud sign-in did not return a session.")
         user_info = result.get("userInfo")
         user = result.get("userId") or (user_info.get("userId") if isinstance(user_info, dict) else None)
         if not isinstance(user, (str, int)) or isinstance(user, bool) or not user:
-            raise MobileAPIError("Mobile sign-in did not return an account identifier.")
+            raise CloudAPIError("Cloud sign-in did not return an account identifier.")
         self.token, self.user_id = result["token"], str(user)
 
     def homes(self, start=0):
@@ -229,29 +229,29 @@ class MobileClient:
         """
         config = self._call("GET", DEFINITION_URL, {})
         if not isinstance(config, dict) or not isinstance(config.get("url"), str):
-            raise MobileAPIError("The cloud endpoint definitions are unavailable.")
+            raise CloudAPIError("The cloud endpoint definitions are unavailable.")
         url = urlsplit(config["url"])
         host = url.hostname or ""
         allowed = host.endswith((".aqara.com", ".aqara.cn")) or (
             host.startswith("aiot-") and host.endswith((".amazonaws.com", ".myqcloud.com")))
         if (url.scheme != "https" or not allowed or url.username or url.password or url.port not in (None, 443)
                 or not re.fullmatch(r"[a-fA-F0-9]{32}", str(config.get("md5", "")))):
-            raise MobileAPIError("The definition download address or checksum is invalid.")
+            raise CloudAPIError("The definition download address or checksum is invalid.")
         try:
             with build_opener(NoRedirects()).open(Request(config["url"]), timeout=20) as response:
                 raw = response.read(8 * 1024 * 1024 + 1)
             if len(raw) > 8 * 1024 * 1024 or hashlib.md5(raw).hexdigest().lower() != config["md5"].lower():
-                raise MobileAPIError("The definition download failed its size or checksum check.")
+                raise CloudAPIError("The definition download failed its size or checksum check.")
             with gzip.GzipFile(fileobj=io.BytesIO(raw)) as stream:
                 data = stream.read(32 * 1024 * 1024 + 1)
             if len(data) > 32 * 1024 * 1024:
-                raise MobileAPIError("The endpoint definitions exceed the supported size.")
+                raise CloudAPIError("The endpoint definitions exceed the supported size.")
             value = json.loads(data)
             if not isinstance(value, dict) or not isinstance(value.get("configs"), list):
-                raise MobileAPIError("The endpoint definitions have an unexpected shape.")
+                raise CloudAPIError("The endpoint definitions have an unexpected shape.")
             return value
         except (OSError, URLError, ValueError, EOFError):
-            raise MobileAPIError("The cloud endpoint definitions could not be downloaded or decoded.") from None
+            raise CloudAPIError("The cloud endpoint definitions could not be downloaded or decoded.") from None
 
     def gateway_details(self, device_id):
         return self._call("GET", GATEWAY_DETAIL, {"deviceId": device_id})
@@ -266,6 +266,6 @@ class MobileClient:
     def traits(self, device_id, paths):
         paths = list(paths)
         if not paths or len(paths) > 300 or any(not isinstance(path, str) or not re.fullmatch(r"\d+\.\d+\.\d+", path) for path in paths):
-            raise MobileAPIError("Choose explicit three-part trait paths from device metadata.")
+            raise CloudAPIError("Choose explicit three-part trait paths from device metadata.")
         return self._call("POST", TRAIT_READ, {"devices": [{"deviceId": device_id,
             "traits": [{"path": path, "needSubscribe": False} for path in paths]}], "needParam": True})

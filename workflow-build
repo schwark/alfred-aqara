@@ -8,51 +8,34 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 ROOT = Path(__file__).resolve().parent
 FILES = ("info.plist", "icon.png", "workflow.sh", "filter.py", "command.py",
-         "common.py", "keychain.py", "updater.py", "runtime.py", "README.md", "LICENSE", "version",
+         "common.py", "keychain.py", "updater.py", "runtime.py", "README.md", "README-cloud.md", "LICENSE", "version",
+         "cloud_transport.py", "cloud_backend.py", "cloud_capabilities.py",
          "workflow/__init__.py", "workflow/workflow.py", "workflow/util.py",
          "workflow/web.py", "workflow/update.py", "workflow/background.py",
          "workflow/version", "workflow/LICENSE")
 
 
-def build(destination=None, mobile=False):
+def build(destination=None):
     info = plistlib.loads((ROOT / "info.plist").read_bytes())
     version = (ROOT / "version").read_text().strip()
     if info["version"] != version:
         raise ValueError("info.plist and version must agree")
-    files = FILES
-    if mobile:
-        version = (ROOT / "mobile-version").read_text().strip()
-        info.update(bundleid="com.schwark.aqara.mobile", name="Aqara Mobile (Experimental)", version=version,
-                    description="Parallel mobile API connection with Agent fallback",
-                    readme=(ROOT / "README-mobile.md").read_text())
-        info["variables"].update(keyword="aqm", AQARA_BACKEND="mobile")
-        for config in info["userconfigurationconfig"]:
-            if config["variable"] == "keyword":
-                config["config"].update(default="aqm", placeholder="aqm")
-        for obj in info["objects"]:
-            if obj["type"] == "alfred.workflow.input.scriptfilter":
-                obj["config"]["title"] = "Aqara Mobile"
-            if obj["type"] == "alfred.workflow.output.notification":
-                obj["config"]["title"] = "Aqara Mobile"
-        files += ("mobile_transport.py", "mobile_backend.py", "cloud_capabilities.py")
-    prefix = "Aqara-Mobile-" if mobile else "Aqara-"
-    output = Path(destination) if destination else ROOT / "dist" / (prefix + version + ".alfredworkflow")
+    info["readme"] = (ROOT / "README.md").read_text() + "\n\n" + (ROOT / "README-cloud.md").read_text()
+    output = Path(destination) if destination else ROOT / "dist" / ("Aqara-" + version + ".alfredworkflow")
     output.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
-        for filename in files:
+        for filename in FILES:
             entry = ZipInfo(filename, date_time=(2026, 1, 1, 0, 0, 0))
             entry.compress_type = ZIP_DEFLATED
             entry.external_attr = (0o100755 if filename == "workflow.sh" else 0o100644) << 16
             content = (plistlib.dumps(info) if filename == "info.plist" else
                        (version + "\n").encode() if filename == "version" else
-                       (ROOT / "README-mobile.md").read_bytes() if mobile and filename == "README.md" else
                        (ROOT / filename).read_bytes())
             archive.writestr(entry, content)
     return output
 
 
 if __name__ == "__main__":
-    arguments = sys.argv[1:]
-    mobile = "--mobile" in arguments
-    arguments = [value for value in arguments if value != "--mobile"]
-    print(build(arguments[0] if arguments else None, mobile=mobile))
+    if len(sys.argv) > 2 or any(value.startswith("--") for value in sys.argv[1:]):
+        sys.exit("Usage: python3 workflow-build [output.alfredworkflow] — one package includes Agent and Cloud modes")
+    print(build(sys.argv[1] if len(sys.argv) > 1 else None))

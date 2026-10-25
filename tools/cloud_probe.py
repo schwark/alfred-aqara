@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only cloud inventory for locally connected Aqara Mobile profiles.
+"""Read-only cloud inventory for locally connected Aqara Cloud profiles.
 
 No login secrets are accepted on the command line. Private evidence is written
 only beneath ~/.cache/alfred-aqara; stdout contains counts and safe error codes.
@@ -18,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common import AqaraError
 from cloud_capabilities import definition_endpoints, panel_endpoints
-from mobile_backend import MobileStore
-from mobile_transport import MobileAPIError
+from cloud_backend import CloudStore
+from cloud_transport import CloudAPIError
 
 
 PRIVATE_ROOT = Path.home() / ".cache/alfred-aqara"
@@ -52,7 +52,7 @@ def save_evidence(destination, value):
 
 
 def error_code(exc):
-    return {"error": "query_failed", "code": exc.code} if isinstance(exc, MobileAPIError) else {"error": "query_failed"}
+    return {"error": "query_failed", "code": exc.code} if isinstance(exc, CloudAPIError) else {"error": "query_failed"}
 
 
 def inspect_device(client, row, home_id=None, bridges=False, definitions=None):
@@ -84,7 +84,7 @@ def inspect_device(client, row, home_id=None, bridges=False, definitions=None):
 def inspect_profile(store, include_devices=False, bridges=False):
     if not store.secrets().get("token"):
         return {"status": "sign_in_required"}, {"status": "sign_in_required"}
-    client = store.mobile_client()
+    client = store.cloud_client()
     homes = client.catalog("homes")
     result = {"profile_id": store.profile_id, "homes": []}
     try:
@@ -134,7 +134,7 @@ def main():
     parser.add_argument("--bridges", action="store_true", help="Also read gateway and Matter bridge metadata; implies --devices")
     parser.add_argument("--output", type=Path, default=PRIVATE_ROOT / "cloud-evidence.json")
     args = parser.parse_args()
-    store = MobileStore()
+    store = CloudStore()
     evidence = {"captured_at": time.time(), "profiles": []}
     summaries = []
     for profile in store.profiles():

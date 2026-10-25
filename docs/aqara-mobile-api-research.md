@@ -1,4 +1,10 @@
-# Aqara mobile API reference and research notes
+# Aqara Cloud API reference and research notes
+
+Current workflow: one `aq` keyword, default Agent mode, and `aq mode cloud` to
+select Cloud mode. The earlier parallel experiment is historical; its connections
+are migrated automatically. See [README-cloud.md](../README-cloud.md) for current
+setup and behavior. Mobile below refers to the app protocol under investigation.
+
 
 Investigated 2026-10-24 for the Alfred Aqara workflow, following the local
 `scraper-tools:discover-mobile-api` skill. This report contains technical
@@ -934,10 +940,10 @@ the call sequence; arguments named `selected_*` must be supplied by the
 caller from discovery, not hardcoded from another account:
 
 ```python
-from tools.mobile_api import AppIdentity, MobileClient
+from tools.mobile_api import AppIdentity, CloudClient
 
 identity = AppIdentity.from_reference(reference_const_path)
-client = MobileClient(identity, selected_area, selected_district)
+client = CloudClient(identity, selected_area, selected_district)
 client.login(account_login, account_password)
 homes = client.homes()
 devices = client.devices(selected_home_id)
@@ -1026,18 +1032,17 @@ same SHA-256 as the published v0.2.7 package; this investigation changed
 research documentation and tools only.
 
 
-## Parallel workflow experiment
+## Cloud mode implementation
 
-The branch now contains a separately packaged `aqm` implementation. Its guide
-is [README-mobile.md](../README-mobile.md). The stable Agent workflow remains
-separate. `mobile_transport.py` shares the signed transport with the read-only
-probe; `mobile_backend.py` adds a small explicit write allowlist. The research
+The branch now packages both modes in one `aq` workflow. `aq mode` selects
+Agent (the default) or Cloud; see [README-cloud.md](../README-cloud.md). `cloud_transport.py` shares the signed transport with the read-only
+probe; `cloud_backend.py` adds a small explicit write allowlist. The research
 probe itself still refuses device writes.
 
 The experiment preserves current commands through imported Agent profiles,
-adds mobile home/device discovery and shared cloud lock actions, and shows
-coverage gaps with `aqm parity`. It is a hybrid experiment, not evidence of full
-mobile-only parity. The common writer has no per-model command dispatch. An
+adds Cloud home/device discovery and shared cloud lock actions, and shows
+coverage gaps with `aq parity`. It is a hybrid experiment, not evidence of full
+Cloud-only parity. The common writer has no per-model command dispatch. An
 endpoint must advertise DoorLock command 35010 or 35011 through Matter metadata
 or current model definitions confirmed by a live trait read. Capabilities are
 queried again before execution. The native device-password dialog is supported;
@@ -1204,7 +1209,7 @@ now use the same sorted fields, with raw values used for the digest. POST
 continues to sign the exact transmitted compact JSON. The legacy paginated
 `/app/qlink/config` query returned code `302`; the gzip definition route works.
 
-Agent home IDs can be opaque and differ from mobile home IDs. `aqm home link`
+Agent home IDs can be opaque and differ from mobile home IDs. `aq home link`
 stores an explicit association in that profile's local settings; names do
 not automatically link homes or devices. Exact device/subject IDs still
 determine writes. Original Agent endpoints and scenes remain available, and

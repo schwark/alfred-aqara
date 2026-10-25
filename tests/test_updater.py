@@ -115,13 +115,13 @@ class UpdaterTest(unittest.TestCase):
         row = build_items('home', self.store, self.updater)[0]
         self.assertEqual(row['title'], 'Aqara 1.0.0 is available')
         self.assertEqual(row['autocomplete'], 'workflow:update')
-        self.assertEqual(json.loads(row['arg']), {'action': 'workflow_update'})
+        self.assertEqual(json.loads(row['arg']), {'action': 'workflow_update', 'mode': 'agent', 'mode_revision': ''})
         self.assertIsNone(Updater(self.store.root, '1.0.0').available())
         self.assertIsNone(Updater(self.store.root, '2.0.0').available())
 
     def test_workflow_controls_and_upgrade_alias_do_not_refresh_devices(self):
         for query in ('workflow:update', 'upgrade'):
-            self.assertEqual(json.loads(build_items(query, self.store)[0]['arg']), {'action': 'workflow_update'})
+            self.assertEqual(json.loads(build_items(query, self.store)[0]['arg']), {'action': 'workflow_update', 'mode': 'agent', 'mode_revision': ''})
         self.assertEqual(len(build_items('workflow:', self.store)), 3)
         with patch.object(command, 'Updater') as updater, patch.object(self.store, 'refresh') as refresh:
             updater.return_value.install.return_value = 'Downloading update.'
