@@ -307,6 +307,9 @@ class CloudStore(Store):
             raise AqaraError("Connect the Cloud account with aq login first.")
         client = BackendClient(load_identity(), value.get("area", ""), value.get("district", ""))
         client.token, client.user_id = value["token"], value["user_id"]
+        settings = self.read("settings")
+        home = next((h for h in settings.get("homes", []) if h["id"] == settings.get("home_id")), {})
+        client.position_id = settings.get("home_links", {}).get(home.get("id"), home.get("mobile_id", ""))
         client.definition_cache = self.directory / "definitions.json"
         return client
 

@@ -42,13 +42,13 @@ option; it does not require a second workflow or keyword.
 
 ## Connect Cloud mode
 
-Install [Aqara-0.3.4.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.4/Aqara-0.3.4.alfredworkflow)
+Install [Aqara-0.3.5.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.5/Aqara-0.3.5.alfredworkflow)
 from [GitHub Releases](https://github.com/schwark/alfred-aqara/releases/latest).
 Both modes are included. To build from the repository instead:
 
 ```sh
 python3 workflow-build
-open dist/Aqara-0.3.4.alfredworkflow
+open dist/Aqara-0.3.5.alfredworkflow
 ```
 
 1. Run `aq mode cloud`. If the earlier parallel workflow was configured,
@@ -138,6 +138,24 @@ code, but live execution remains unverified.
 Notifications describe the requested action. Use `status` to check the resulting
 reported state. Browsing, import, refresh, and coverage inspection do not issue
 device writes. A failed native write is never retried through Agent.
+
+## Device and channel names
+
+Cloud mode reads Aqara's endpoint panels in the selected account and home.
+Composite switches use the individual channel names configured in Aqara Home,
+instead of appending “Endpoint 2” to the parent switch name. Endpoint IDs remain
+bound to their declared commands, and duplicate names retain room labels.
+Generic endpoint labels are used only when Aqara provides no channel name.
+
+A live four-button Z1 Pro returned four named channels: three power relays and
+one wireless button. The three relay channels offer on/off; the wireless button
+remains read-only. Other models use the same metadata-driven discovery.
+Run `aq update` after renaming channels in Aqara Home.
+
+A Cloud refresh can take several seconds while it reads device capabilities.
+A start notification appears immediately; reopen `aq upd` to see progress and,
+after completion, the timestamp and device/scene counts. Device refresh stays
+first, followed by workflow update, including when a new release is available.
 
 ## Multiple homes, accounts, and regions
 

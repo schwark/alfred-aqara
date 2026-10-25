@@ -2,10 +2,12 @@
 """Execute one selected Alfred action, with fresh validation of its target."""
 
 import json
+import os
 import subprocess
 import sys
+import time
 
-from common import AqaraError, Client, LOGIN_URL, Store, control_body, normalize, selector
+from common import AqaraError, Client, LOGIN_URL, Store, control_body, normalize, refresh_in_progress, selector
 from keychain import KeychainError
 from updater import Updater
 from runtime import get_store, set_mode, validate_action
@@ -27,6 +29,15 @@ def prompt_profile_name():
               'buttons {"Cancel", "Rename"} default button "Rename")')
     result = subprocess.run(["/usr/bin/osascript", "-e", script], capture_output=True, text=True)
     return result.stdout.strip() if result.returncode == 0 else None
+
+
+def notify_refresh_started():
+    try:
+        subprocess.run(["/usr/bin/osascript", "-e",
+                        'display notification "Refreshing devices and scenes…" with title "Aqara"'],
+                       capture_output=True, timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        pass  # Notification permissions must not prevent a refresh.
 
 
 def execute(action, store=None):
@@ -132,7 +143,21 @@ def execute(action, store=None):
         return "Switched to %s · %s: %s devices, %s scenes." % (target.profile_name(), home,
                 len(catalog.get("devices", [])), len(catalog.get("scenes", [])))
     if name == "update":
-        devices, scenes = store.refresh()
+        if (action.get("profile_id", store.profile_id) != store.profile_id
+                or action.get("home_id", store.read("settings").get("home_id", "")) != store.read("settings").get("home_id", "")):
+            raise AqaraError("The selected account or home changed. Select Refresh devices and scenes again.")
+        if refresh_in_progress(store):
+            return "Already refreshing devices and scenes. Run aq upd to see progress."
+        home_id = store.read("settings").get("home_id", "")
+        store.write("refresh", {"state": "running", "started": time.time(), "pid": os.getpid(), "home_id": home_id})
+        notify_refresh_started()
+        try:
+            devices, scenes = store.refresh()
+        except Exception:
+            store.write("refresh", {"state": "failed", "finished": time.time(), "home_id": home_id})
+            raise
+        store.write("refresh", {"state": "complete", "finished": time.time(), "devices": devices, "scenes": scenes,
+                                "home_id": store.read("settings").get("home_id", "")})
         return "%s · %s: refreshed %s devices and %s scenes." % (store.profile_name(), store.read("settings").get("home_name", "Home"), devices, scenes)
     if name not in ("control", "scene"):
         raise AqaraError("Unknown workflow action.")

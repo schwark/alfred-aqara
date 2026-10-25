@@ -173,6 +173,7 @@ class CloudClient:
         self.area, self.district = area, district
         self.opener = opener or build_opener(NoRedirects())
         self.token, self.user_id = "", ""
+        self.position_id = ""
 
     def _call(self, method, path, fields):
         if (method, path) not in self.routes:
@@ -249,7 +250,10 @@ class CloudClient:
 
     def panels(self, device_id):
         """Read endpoint paths for Zigbee and hub devices without assuming Matter."""
-        return self._call("GET", PANELS, {"subjectIds": device_id, "types": "device_endpoint_panel"})
+        fields = {"subjectIds": device_id, "types": "device_endpoint_panel", "ownerId": self.user_id}
+        if self.position_id:
+            fields["positionId"] = self.position_id
+        return self._call("GET", PANELS, fields)
 
     def specification(self):
         """Global semantics are reference data, never proof of device support."""

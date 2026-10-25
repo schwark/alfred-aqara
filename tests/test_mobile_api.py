@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlsplit
 
 from tools.mobile_api import AppIdentity, CloudAPIError, CloudClient, NoRedirects, encrypt_password, signature
 
@@ -107,10 +108,16 @@ class MobileAPITest(unittest.TestCase):
 
     def test_zigbee_panels_and_traits_are_read_only_without_subscription(self):
         self.client.token = 'example-token'
+        self.client.user_id = 'example-user'
+        self.client.position_id = 'example-home'
         self.response({'code': 0, 'result': []})
         self.client.panels('example-device')
         request = self.opener.open.call_args[0][0]
-        self.assertTrue(request.full_url.endswith('/app/layout/collection/panels?subjectIds=example-device&types=device_endpoint_panel'))
+        self.assertTrue(urlsplit(request.full_url).path.endswith('/app/layout/collection/panels'))
+        self.assertEqual(parse_qs(urlsplit(request.full_url).query), {
+            'subjectIds': ['example-device'], 'types': ['device_endpoint_panel'],
+            'positionId': ['example-home'], 'ownerId': ['example-user']})
+        self.assertEqual(request.method, 'GET')
         self.response({'code': 0, 'result': []})
         self.client.traits('example-device', ['2.148.32970', '2.148.33026'])
         request = self.opener.open.call_args[0][0]

@@ -221,6 +221,47 @@ class CloudBackendTest(unittest.TestCase):
         fallback.request.assert_called_once_with("device/control", {
             "device_ids": ["example-subject"], "attribute": "color", "action": "set", "value": "blue"})
 
+    def test_cloud_client_binds_panel_queries_to_selected_or_linked_cloud_home(self):
+        self.values['default'] = json.dumps({'area': 'US', 'district': 'US', 'token': 'example-token', 'user_id': 'example-user'})
+        identity = AppIdentity('exampleappid0000', 'example_application_key', (1 << 2048) - 159)
+        with patch('cloud_backend.load_identity', return_value=identity):
+            self.assertEqual(self.store.cloud_client().position_id, 'example-home')
+            settings = self.store.read('settings')
+            settings['home_links'] = {'example-home': 'linked-cloud-home'}
+            self.store.write('settings', settings)
+            self.assertEqual(self.store.cloud_client().position_id, 'linked-cloud-home')
+            other = self.store.add_profile('Another account', '{}')
+            self.values[other.profile_id] = json.dumps({'area': 'US', 'district': 'US', 'token': 'another-token', 'user_id': 'another-user'})
+            other.write('settings', {'home_id': 'another-home', 'homes': [{'id': 'another-home', 'mobile_id': 'another-cloud-home'}]})
+            self.assertEqual(other.cloud_client().position_id, 'another-cloud-home')
+            self.assertEqual(other.cloud_client().user_id, 'another-user')
+
+    def test_four_button_composite_uses_individual_names_and_keeps_button_read_only(self):
+        self.values['default'] = json.dumps({'token': 'example-token'})
+        self.mobile.catalog.side_effect = [
+            [{'homeId': 'example-home', 'homeName': 'Example Home'}],
+            [{'did': 'example-device', 'deviceName': 'Composite Switch', 'model': 'example-composite'}], []]
+        names = ['Ceiling Light', 'Desk Light', 'Accent Light', 'Scene Button']
+        subjects = [{'deviceId': 'example-device', 'endpointId': ep, 'endpointName': name,
+                     'subjectKey': 'example-subject-' + str(ep), 'deviceTypes': 'Switch,Button' if ep < 5 else 'Button',
+                     'paths': [str(ep) + ('.132.32920' if ep < 5 else '.131.32916')]}
+                    for ep, name in zip(range(2, 6), names)]
+        self.mobile.panels.return_value = [{'subjects': [subject]} for subject in subjects]
+        self.mobile.matter_details.side_effect = CloudAPIError('Not Matter', 7167)
+        self.mobile.traits.return_value = [{'deviceId': 'example-device', 'traits': [
+            {'path': subject['paths'][0], 'value': '1'} for subject in subjects]}]
+        with patch.object(self.store, 'cloud_client', return_value=self.mobile):
+            self.assertEqual(self.store.refresh(), (4, 0))
+        devices = self.store.read('catalog')['devices']
+        self.assertEqual({d['name'] for d in devices}, set(names))
+        self.assertTrue(all('Endpoint ' not in d['name'] for d in devices))
+        by_endpoint = {d['endpoint']: d for d in devices}
+        self.assertEqual(set(controls(by_endpoint['2'])), {'status', 'on', 'off'})
+        self.assertEqual(set(controls(by_endpoint['5'])), {'status'})
+        self.assertEqual(by_endpoint['2']['id'], 'mobile:example-device#2')
+        self.mobile.write_trait.assert_not_called()
+        self.mobile.write_lock.assert_not_called()
+
     def test_old_mixed_caches_only_expose_cloud_rows_without_a_network_refresh(self):
         agent = {"id": "agent-lock", "name": "Entry Lock", "type": "DoorLock", "room": "Hall"}
         cloud = dict(self.device, name="Entry Lock (Cloud)", label="Entry Lock (Cloud)")

@@ -101,6 +101,7 @@ def inspect_profile(store, include_devices=False, bridges=False):
     device_count = 0
     for home in homes:
         identifier = str(home.get("homeId") or home["positionId"])
+        client.position_id = identifier
         devices = client.catalog("devices", identifier)
         device_count += len(devices)
         inspected = [inspect_device(client, row, identifier, bridges, definitions) for row in devices] if include_devices else devices

@@ -202,6 +202,18 @@ def normalize(payload, kind):
     return result
 
 
+def refresh_in_progress(store):
+    state = store.read("refresh")
+    pid = state.get("pid")
+    if state.get("state") != "running" or type(pid) is not int or not 0 < pid < 2**31:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
 class Store:
     mode = "agent"
 
@@ -306,7 +318,7 @@ class Store:
         return name
 
     def clear_catalog(self):
-        for name in ("catalog", "catalogs", "status"):
+        for name in ("catalog", "catalogs", "status", "refresh"):
             (self.directory / (name + ".json")).unlink(missing_ok=True)
 
     def client(self):

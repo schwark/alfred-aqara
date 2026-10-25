@@ -5,8 +5,9 @@ import ast
 import json
 import re
 import sys
+import time
 
-from common import AqaraError, Store, control_body, controls, selector, table_rows
+from common import AqaraError, Store, control_body, controls, refresh_in_progress, selector, table_rows
 from keychain import KeychainError
 from updater import Updater
 from runtime import get_store, mode_state, workflow_root
@@ -30,6 +31,30 @@ def scoped(store, action, **kwargs):
 
 def scope_label(store):
     return store.profile_name() + " · " + store.read("settings").get("home_name", "Choose a home")
+
+
+def refresh_item(store):
+    if refresh_in_progress(store):
+        return item("Refreshing devices and scenes…", "Reading Aqara; this can take several seconds", autocomplete="update")
+    state = store.read("refresh")
+    subtitle = "Also discovers homes on your account"
+    same_home = state.get("home_id") == store.read("settings").get("home_id", "")
+    if (state.get("state") == "complete" and same_home
+            and isinstance(state.get("finished"), (int, float))
+            and type(state.get("devices")) is int and type(state.get("scenes")) is int):
+        seconds = max(0, int(time.time() - state["finished"]))
+        if seconds < 60:
+            ago = "just now"
+        elif seconds < 3600:
+            ago = "%s minutes ago" % (seconds // 60)
+        else:
+            ago = "%s hours ago" % (seconds // 3600)
+        subtitle = "Last refreshed %s · %s devices · %s scenes" % (ago, state["devices"], state["scenes"])
+    elif state.get("state") == "failed" and same_home:
+        subtitle = "Last refresh failed · Press Return to try again; errors appear in Alfred's debugger"
+    elif state.get("state") == "running":
+        subtitle = "Previous refresh was interrupted · Press Return to try again"
+    return item("Refresh devices and scenes", subtitle, scoped(store, "update"), "update")
 
 
 def home_items(query, store):
@@ -247,6 +272,7 @@ def device_choices(devices, remainder=""):
 
 def build_items(query, store=None, updater=None):
     term = query.strip().casefold()
+    refresh_query = bool(term) and "update".startswith(term)
     if term.partition(" ")[0] == "mode":
         root = getattr(store, "workflow_root", store.root) if store is not None else workflow_root()
         current = mode_state(root)[0]
@@ -284,13 +310,24 @@ def build_items(query, store=None, updater=None):
         result.append(item("Mode: " + store.mode.title(), "Switch between Agent and Cloud", autocomplete="mode ", uid="mode"))
     if not term:
         result.append(item("Workflow updates", "Check for updates or change automatic checks", autocomplete="workflow:"))
+    if refresh_query:
+        # Device/type matches must not hide the refresh command on short queries.
+        result = [row for row in result if json.loads(row.get("arg", "{}")).get("action") != "update"]
+        result.insert(0, refresh_item(store))
+    else:
+        result = [refresh_item(store) if json.loads(row.get("arg", "{}")).get("action") == "update" else row for row in result]
     status = updater.available()
     if status:
-        result.insert(0, item("Aqara " + status["version"] + " is available", "Install the update · Confirm the upgrade in Alfred",
+        if refresh_query:
+            result = [row for row in result if json.loads(row.get("arg", "{}")).get("action") != "workflow_update"]
+        result.insert(1 if refresh_query else 0, item("Aqara " + status["version"] + " is available", "Install the update · Confirm the upgrade in Alfred",
                               {"action": "workflow_update"}, "workflow:update", "workflow-update"))
     if not result:
         result = [item("No matching devices or scenes", "Try a room or device name, or aq update to refresh")]
     for row in result:
+        if refresh_query:
+            # Removing UIDs also ignores ordering already learned by Alfred.
+            row.pop("uid", None)
         if "arg" in row:
             action = json.loads(row["arg"])
             action.update(mode=store.mode, mode_revision=getattr(store, "mode_revision", ""))
@@ -403,12 +440,14 @@ def main():
             store = get_store()
             updater = Updater(store.workflow_root)
             updater.schedule()
-            refresh = updater.checking()
+            refresh = updater.checking() or refresh_in_progress(store)
             result = build_items(query, store, updater)
     except (AqaraError, KeychainError, OSError) as exc:
         result = [item("Aqara unavailable", str(exc))]
         print("Aqara: " + str(exc), file=sys.stderr)
     response = {"items": result}
+    if query.strip() and "update".startswith(query.strip().casefold()):
+        response["skipknowledge"] = True
     if refresh:
         response["rerun"] = 0.5
     print(json.dumps(response, ensure_ascii=False))

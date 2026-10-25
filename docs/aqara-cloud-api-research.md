@@ -1306,3 +1306,34 @@ configured Macs use Keychain. The identity authenticates the app client to
 Aqara's cloud API, not a lock pairing. Requests still address device endpoints
 through Aqara's regional HTTPS service; the tested U100 route uses its M3.
 No direct Bluetooth or LAN lock transport was introduced.
+
+
+### Home-scoped endpoint labels in 0.3.5
+
+The endpoint panel request must carry its selected home/account context:
+
+```text
+GET /app/v1.0/lumi/app/layout/collection/panels
+ownerId=<account-user-id>&positionId=<cloud-home-id>&subjectIds=<did>&types=device_endpoint_panel
+```
+
+The app's recovered `HomePanelApi.queryCardData` declaration includes
+`positionId`, `ownerId`, and a `subjectIds` list. A live request containing
+only `subjectIds` and `types` returned an empty list for a composite switch.
+Adding the home and owner context returned the per-channel panels. Their
+`subjects` include `deviceId`, `endpointId`, `endpointName`, `subjectKey`,
+`deviceTypes`, `paths`, `endpointPositionId`, and `endpointPositionName`.
+Display names come from `endpointName`; routing still uses exact returned
+identifiers. No matching by name or channel order is introduced.
+
+A four-button Z1 Pro sample exposed named endpoints 2, 3, and 4 with power
+trait `132.32920`, plus named endpoint 5 of type `Button` without that trait.
+Live trait reads confirmed on/off capability for the relay channels. The
+wireless button remains read-only. This matches the three relays plus wireless
+fourth rocker described in [Aqara's Z1 Pro manual](https://www.aqara.com/wp-content/uploads/2023/12/Z1-Pro-User-Manual.pdf).
+These are read-only observations; no relay or lock command was sent.
+
+`CloudStore.cloud_client()` binds panel discovery to the selected Cloud home
+or its explicit home link. The read-only probe likewise binds each home before
+querying its devices. Model definitions remain a fallback for metadata
+unavailable from panels. Multi-channel names require no per-model driver.
