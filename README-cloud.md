@@ -40,7 +40,9 @@ option; it does not require a second workflow or keyword.
 
 ## Connect Cloud mode
 
-Build and import the single workflow from the `codex/aqara-mobile-api` branch:
+Install [Aqara-0.3.0.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.0/Aqara-0.3.0.alfredworkflow)
+from [GitHub Releases](https://github.com/schwark/alfred-aqara/releases/latest).
+Both modes are included. To build from the repository instead:
 
 ```sh
 python3 workflow-build
@@ -52,8 +54,9 @@ open dist/Aqara-0.3.0.alfredworkflow
    mode automatically. Otherwise, run `aq import` before adding Cloud accounts
    to copy your Agent profiles, cached catalogs, and fallback keys. Agent mode
    keeps its existing setup.
-2. If the signing identity was not migrated, run `aq identity` and select the external `const.py` containing `APPID`,
-   `APPKEY`, `RSA_N`, and `RSA_E`. The reference used during development is
+2. If the signing identity was not migrated, run `aq identity` and select the
+   external `const.py` containing `APPID`, `APPKEY`, `RSA_N`, and `RSA_E`.
+   The reference used during development is
    [aquara-local at this pinned revision](https://github.com/home-assistant-plugins/aquara-local/blob/4fc274688cd40774307549172c9ae1db073c92ca/custom_components/aquara_local/const.py).
    Only literal assignments are read; the file is never executed. The imported
    app identity is saved in Keychain and is excluded from source and packages.
@@ -81,6 +84,21 @@ The account password is used once for sign-in and then discarded. Only the
 returned session and routing fields are saved in Keychain. Sessions are not
 refreshed automatically; run `aq login` again if a session expires or is rejected.
 macOS may ask you to allow Python to access the Keychain items.
+
+## Upgrading from the parallel workflow
+
+Install the unified Aqara workflow into the existing `aq` entry, then run
+`aq mode cloud`. On the first switch, the workflow copies the earlier parallel
+setup's profiles, catalogs, home links, sessions, and signing identity into the
+new Cloud data directory and Keychain service. Existing Cloud data is not
+overwritten, and a failed migration removes its newly copied credentials.
+The earlier setup remains available for recovery.
+
+Migrated sessions can be used immediately; run `aq login` only when reconnecting
+an expired or rejected session. Do not run `aq import` after migration, since
+it is only for an unconfigured Cloud mode. Once the unified setup works, disable
+or remove the earlier parallel workflow in Alfred to retire its old keyword.
+The workflow migrates data; it does not remove another installed workflow.
 
 ## Daily use
 
@@ -173,8 +191,8 @@ Both requests were accepted, and fresh reads reported the requested states.
 Those tests establish cloud acceptance and status readback; mechanical movement
 was not independently observed. Other device/firmware combinations have not
 been verified. Details are in the
-[Cloud API notes](https://github.com/schwark/alfred-aqara/blob/codex/aqara-mobile-api/docs/aqara-mobile-api-research.md)
-and [M3 hub investigation](https://github.com/schwark/alfred-aqara/blob/codex/aqara-mobile-api/docs/aqara-hub-api-research.md).
+[Cloud API notes](https://github.com/schwark/alfred-aqara/blob/main/docs/aqara-cloud-api-research.md)
+and [M3 hub investigation](https://github.com/schwark/alfred-aqara/blob/main/docs/aqara-hub-api-research.md).
 
 ## Updates
 
@@ -210,5 +228,5 @@ directory, and `mode.json` stores the operating-mode choice.
 Packages use an explicit file allowlist. They contain no saved accounts,
 home/device records, app constants, credentials, APKs, or traffic captures.
 Research tools are excluded from the workflow; see the
-[Cloud API research notes](https://github.com/schwark/alfred-aqara/blob/codex/aqara-mobile-api/docs/aqara-mobile-api-research.md)
+[Cloud API research notes](https://github.com/schwark/alfred-aqara/blob/main/docs/aqara-cloud-api-research.md)
 for protocol details and read-only capture tools.

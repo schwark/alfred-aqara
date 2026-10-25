@@ -4,7 +4,7 @@ Control Aqara devices and run saved scenes from Alfred. Inspired by
 Alfred home automation workflows, with the same
 device-first command style.
 
-The default **Agent mode** uses **Aqara Agent's official cloud API**. Your Hub M3 and its
+The default **Agent mode** uses **Aqara Agent's official cloud API**. Your hub and
 devices must be registered in Aqara Home. The Mac needs internet access;
 the hub's IP address and a Home Assistant installation are not required.
 Availability depends on the devices and account region exposed by Aqara Agent.
@@ -21,15 +21,18 @@ capabilities, and setup. Each mode keeps its own accounts and selected home.
 - macOS with Alfred 5 and a Powerpack license.
 - Python 3.9 or newer, installed from [python.org](https://www.python.org/downloads/macos/)
   or Homebrew (`brew install python`). No Python packages are required.
-- An Aqara account that can sign in to [Aqara Agent](https://agent.aqara.com/login).
+- Agent mode: an account that can sign in to [Aqara Agent](https://agent.aqara.com/login).
+- Cloud mode: an Aqara Home login and a separately imported signing identity;
+  see [Cloud requirements](README-cloud.md#requirements).
 
 ## Install and connect
 
 These steps connect the default Agent mode. For Cloud, switch with `aq mode cloud`
 and follow [the Cloud setup guide](README-cloud.md#connect-cloud-mode).
 
-1. Build the workflow with `python3 workflow-build`, then open
-   `dist/Aqara-0.3.0.alfredworkflow` to import it into Alfred.
+1. Download [Aqara-0.3.0.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.0/Aqara-0.3.0.alfredworkflow)
+   and open it to import into Alfred. To build from source, run
+   `python3 workflow-build` and open `dist/Aqara-0.3.0.alfredworkflow`.
 2. Type `aq login` in Alfred and press Return. Sign in with your Aqara account.
 3. Copy the **aqara_api_key** shown on the page. Type `aq apikey` in Alfred and
    press Return to paste it into the secure dialog. It is saved in macOS Keychain.
@@ -41,6 +44,29 @@ and follow [the Cloud setup guide](README-cloud.md#connect-cloud-mode).
 
 macOS may ask you to allow Python to access the Aqara Keychain item. After
 replacing or updating Python, you may need to allow access again.
+
+## Operating modes and upgrades
+
+`aq mode` shows Agent and Cloud choices and marks the current mode. Select one
+with Return, or type `aq mode agent` / `aq mode cloud`. The choice persists
+across Alfred sessions; switching sends no device commands. Commands selected
+before switching must be selected again afterward.
+
+| Mode | Connection | Controls |
+| --- | --- | --- |
+| Agent (default) | Aqara Agent API key | Existing device controls and scenes; locks show status |
+| Cloud | Aqara Home session and signing identity | Advertised lock/unlock, power, brightness, and color temperature; Agent fallback retains other controls and scenes |
+
+Each mode remembers its own accounts, selected home, catalogs, and status
+preferences. Updates apply to the one workflow, and `aq reinit` resets only
+the selected mode.
+
+From v0.2.7, run `aq workflow:update` or install the download above. Your Agent
+connections remain available. Then use `aq mode cloud` and follow
+[the Cloud guide](README-cloud.md#connect-cloud-mode) if you want Cloud controls.
+For migration from the earlier parallel workflow, see
+[Cloud migration](README-cloud.md#upgrading-from-the-parallel-workflow).
+Changes and validation are in the [v0.3.0 release notes](docs/releases/v0.3.0.md).
 
 ## Commands
 
@@ -135,11 +161,11 @@ and catalogs. Adding another connection preserves the existing connections.
 Controls are offered by device family. A specific light may lack color or color
 temperature support; Aqara can reject a command the hardware does not support.
 Aqara Agent [explicitly excludes door lock lock/unlock commands](https://github.com/aqara/aqara-agent-skills/blob/main/skills/aqara-agent/SKILL.md#out-of-scope).
-Door locks therefore show status and an explanation of the unavailable controls.
+In Agent mode, door locks show status and an explanation of the unavailable controls.
 The current API action table also does not document hub security mode controls.
 Switch to `aq mode cloud` for supported lock controls; see the
-[Cloud mode guide](README-cloud.md#lock-control). Lock and unlock are never guessed or sent through the
-generic Aqara device control API. Serialized device status is displayed as
+[Cloud mode guide](README-cloud.md#lock-control). Lock and unlock use declared
+Cloud command mappings rather than the generic Agent control API. Serialized device status is displayed as
 readable fields joined in the device's subtitle, for example:
 `Door: Closed · Lock: Locked · Connection: Online`. Internal remote-control flags
 are hidden. Copy or Large Type on a status row shows the full summary when the
@@ -163,15 +189,16 @@ Releases requiring a newer Alfred version are skipped.
 
 Use `aq workflow:noautoupdate` to turn off automatic checks, and
 `aq workflow:autoupdate` to turn them back on. `aq update` continues to refresh
-your Aqara devices, homes, and scenes. Upgrades preserve the selected mode, both modes' saved accounts, home
-selections, and Keychain credentials. Update checks use GitHub's public API;
+your Aqara devices, homes, and scenes. Upgrades preserve the selected mode,
+both modes' saved accounts, home selections, and Keychain credentials.
+Update checks use GitHub's public API;
 they do not send Aqara credentials or account data. Updater settings, cached
 release information, downloads, and logs live under `workflow-updates/` in the
 workflow data directory, separate from each account's settings.
 
 ## Local data
 
-API keys are generic passwords in macOS Keychain with service
+Agent API keys are generic passwords in macOS Keychain with service
 `com.schwark.aqara`. The original connection uses account `api-key`; added
 connections use `api-key:<profile-id>`. Home selections and catalogs are
 stored in Alfred's workflow data directory, outside the installed workflow:
@@ -184,6 +211,11 @@ Search uses the local catalog, so typing does not repeatedly query the API.
 The original connection retains its existing files. Added connections have
 separate data directories under `profiles/<profile-id>/`; `accounts.json`
 stores their labels and the active profile, with no credentials.
+Cloud accounts and catalogs live under `cloud/` and use the separate Keychain
+service `com.schwark.aqara.cloud`. `mode.json` records the mode preference and
+selection revision. See [Cloud local data](README-cloud.md#local-data-and-privacy)
+for the session and signing-identity layout.
+
 Run `aq update` when adding, removing, or renaming devices or scenes. Status
 requests are cached for five seconds. Controls, scene requests, home changes,
 and reconnection invalidate status. Replacing the key clears the previous
@@ -206,13 +238,14 @@ coverage. Switch back at any time with `aq mode agent`.
 
 See [README-cloud.md](README-cloud.md) for setup, command coverage, multiple
 accounts and homes, migration from the earlier parallel workflow, and limitations.
-The [API research notes](docs/aqara-mobile-api-research.md) describe the underlying
+The [API research notes](docs/aqara-cloud-api-research.md) describe the underlying
 app protocol. Both modes share one package and update channel.
 
 ## Development
 
 ```sh
 python3 -m unittest discover -s tests -v
+/usr/bin/python3 -m unittest discover -s tests -v
 python3 workflow-build
 ```
 
@@ -222,11 +255,22 @@ profile. The build uses an explicit file allowlist and excludes local data,
 tests, `.git`, and credentials. Both macOS's Python 3.9 and current Homebrew
 Python are supported.
 
+The v0.3.0 suite passes 157 offline tests on Python 3.9 and 3.14. Tests cover
+mode persistence, migration rollback, account/home isolation, stale selections,
+native capability checks, retained Agent controls, and verified update downloads.
+The offline suite does not send physical device commands.
+
 `filter.py` renders Alfred results, `command.py` executes selected actions,
 `common.py` manages Agent requests and the catalog, `cloud_backend.py` adds the
 Cloud connection, `runtime.py` persists the mode, and `keychain.py` uses the
 native Security framework. API requests are fixed to the official HTTPS host;
 redirects are rejected so the bearer key is not forwarded elsewhere.
+
+The [Cloud API report](docs/aqara-cloud-api-research.md) documents signed regional
+requests, metadata discovery, and tested command behavior. The
+[hub report](docs/aqara-hub-api-research.md) distinguishes the implemented cloud
+route from optional LANLink research. These reports and research tools are
+excluded from the workflow package.
 
 `workflow/` vendors the Python 3 Alfred-Workflow port bundled with Hubitat
 (Alpynist 2.0.0), originally by Dean Jackson and ported by Arthur Pinheiro.

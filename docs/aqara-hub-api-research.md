@@ -1,5 +1,11 @@
 # M3 hub control research
 
+Version 0.3.0 ships the verified cloud route in the single Aqara workflow.
+Use `aq mode cloud` for Cloud controls or `aq mode agent` for the default
+Agent connection. See [Cloud setup](../README-cloud.md), the
+[Cloud API report](aqara-cloud-api-research.md), and
+[release notes](releases/v0.3.0.md). LANLink remains optional research.
+
 ## Objective and correction
 
 The primary target is **Alfred → Aqara regional cloud → M3 hub → devices**,
@@ -12,7 +18,9 @@ The U100's encrypted app-plugin branch establishes requirements for that
 branch. It does **not** establish that every hub-level API needs the phone's
 lock-pairing key. Likewise, a failed `/matter/dev/detail` call against a Zigbee
 lock does not rule out hub LAN control or the hub's Matter bridge. The previous
-mobile experiment implemented only part of the available control surface.
+parallel experiment initially implemented only part of the available control
+surface. The unified Cloud mode now uses declared standard commands confirmed
+against the live devices.
 
 ## Cloud control is a separate path
 
@@ -20,7 +28,9 @@ The current public [AIOT API guide](https://docs.aqara.com/docs/aqara-developer/
 documents regional HTTPS bases under `{host}/v4.0/open/api`, with developer
 application signing credentials (`Appid`, `Keyid`, signature) and account
 authorization via `Accesstoken`. These are a separate credential family from
-the Agent API key and the mobile account session.
+the Agent API key and the Aqara Home session used by Cloud mode. The public
+developer API was documented during the investigation; it is not the runtime's
+current transport.
 
 Relevant documented operations are:
 
@@ -58,8 +68,9 @@ repository, and `CardDataApi` declares these cloud routes under `/app/v1.0/lumi`
 
 `DeviceCardDataNetRepository` confirms the generic request construction. The
 cloud target is a device ID; neither the M3's LAN address nor a LANLink tunnel
-appears in those requests. Exact routing and lock authorization remain server
-responsibilities to validate. This is not a demonstrated cloud tunnel for
+appears in those requests. Exact hub/device routing remains a server
+responsibility; the later U100/U300 tests validated command acceptance and state
+readback for the selected devices. This is not a demonstrated cloud tunnel for
 arbitrary LANLink messages. A separate `/dev/rpc` string in a legacy gateway
 API class remains only a lead; M3 compatibility and request semantics were not
 established.
@@ -190,7 +201,7 @@ devices. No writable control is inferred solely from a global specification.
 handshake/check-in against an explicitly selected hub. It transmits no device
 writes, scene runs, pairing changes, or lock operations. By default the
 handshake sends no account credentials. `--profile` explicitly loads a saved
-mobile session from Keychain for check-in. Output summarizes success without
+Cloud session from Keychain for check-in. Output summarizes success without
 printing device IDs, addresses, tokens, or topology contents.
 
 The probe imports only the separately cloned reference's reviewed `crypto.py`,
@@ -210,13 +221,13 @@ python3 tools/hub_probe.py --discover \
 
 For a handshake, pass a selected `{host,port,did}` object on stdin to the probe
 with `--reference <separately-cloned-Aqara-LANLink-directory>`. Add
-`--profile <saved-mobile-profile-id>` only for the selected account's check-in.
+`--profile <saved-cloud-profile-id>` only for the selected account's check-in.
 Raw reference code, proprietary native libraries, captures, and private
 discovery records are excluded from the workflow and repository.
 
 ## Cloud implementation and validation
 
-The experimental runtime now uses the shared collection-panel and trait-read
+Cloud mode uses the shared collection-panel and trait-read
 routes for endpoint discovery, alongside Matter details. It binds a response
 to the requested device and exact endpoint. A unique returned `subjectKey`
 can associate a native endpoint with an Agent endpoint; names cannot.
@@ -293,4 +304,6 @@ Brief local discovery is not proof of absence, and discovery of Matter/HomeKit
 services is not proof that the specific M3 or its U100 endpoint was found.
 LAN control requires network reachability; homes on another network require
 an appropriate private network path or a separately verified remote transport.
-The existing Agent functionality remains the baseline during this experiment.
+The released Cloud mode uses the regional HTTPS route, so remote homes do not
+depend on LAN reachability. Optional LAN validation does not replace the
+implemented cloud path or change the default Agent mode.
