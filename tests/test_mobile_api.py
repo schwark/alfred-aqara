@@ -50,6 +50,7 @@ class MobileAPITest(unittest.TestCase):
         self.response({'code': 0, 'result': {'token': 'example-token', 'userInfo': {'userId': 'example-user'}}})
         self.client.login('example@example.invalid', 'example-password')
         request = self.opener.open.call_args[0][0]
+        self.assertTrue(request.full_url.startswith('https://aiot-rpc-usa.aqara.com/app/v1.0/lumi/'))
         self.assertEqual(self.client.token, 'example-token')
         self.assertNotIn(b'example-password', request.data)
         self.assertNotIn('example-password', str(request.header_items()))
@@ -73,12 +74,26 @@ class MobileAPITest(unittest.TestCase):
 
     def test_client_cannot_send_control_writes_or_fetch_lock_credentials(self):
         self.client.token = 'example-token'
-        for method, path in [('POST', '/matter/write'), ('GET', '/dev/lock/query'), ('POST', '/dev/lock/user/add')]:
+        for method, path in [('POST', '/matter/write'), ('GET', '/dev/lock/query'),
+                             ('POST', '/dev/lock/user/add'), ('POST', '/devex/lock/pwd')]:
             with self.subTest(path=path), self.assertRaises(MobileAPIError):
                 self.client._call(method, path, {})
         self.opener.open.assert_not_called()
         with self.assertRaises(MobileAPIError):
             MobileClient(self.identity, 'https://example.invalid', 'US')
+
+    def test_matter_queries_use_device_endpoint_metadata_and_read_route(self):
+        self.client.token = 'example-token'
+        self.response({'code': 0, 'result': {'endpoints': []}})
+        self.client.matter_details('example-device')
+        request = self.opener.open.call_args[0][0]
+        self.assertTrue(request.full_url.endswith('/matter/dev/detail?did=example-device&fullValue=true'))
+        self.assertEqual(request.method, 'GET')
+        self.response({'code': 0, 'result': []})
+        self.client.matter_status('example-device', ['7.148.32970.1'])
+        request = self.opener.open.call_args[0][0]
+        self.assertTrue(request.full_url.endswith('/res/query/by/resourceId'))
+        self.assertEqual(json.loads(request.data), {'data': [{'subjectId': 'example-device', 'options': ['7.148.32970.1']}]})
 
     def test_no_session_prevents_network_and_missing_user_id_rejects_session(self):
         with self.assertRaises(MobileAPIError):

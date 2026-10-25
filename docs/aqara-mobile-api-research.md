@@ -1,125 +1,185 @@
 # Aqara mobile API research
 
-Investigated 2026-10-24 for the Alfred Aqara workflow. Static analysis used
-JADX 1.5.6 and APKTool 3.0.3, following the local
-`scraper-tools:discover-mobile-api` skill.
+Investigated 2026-10-24 for the Alfred Aqara workflow, following the local
+`scraper-tools:discover-mobile-api` skill. This report contains technical
+protocol findings only; account details, device identifiers, credentials,
+session tokens, and returned device states are omitted.
 
 ## Finding
 
-The official Android APK contains private mobile API paths. An independent
-community implementation provides a concrete D100 cloud-control lead.
-Compatibility with other lock models is still unknown. No mobile login,
-lock/unlock command, or authenticated traffic capture was performed.
+Mobile-account authentication, home/device discovery, and lock-state reads
+are now verified against the service. The U100 and U300 app plugins expose
+different control paths. Neither lock nor unlock has been sent or verified.
+The released and installed Alfred workflow still uses Aqara Agent; this
+research does not add mobile lock control to the workflow.
 
-## Evidence collected directly from the APK
+The U100's Zigbee remote-control branch encrypts a command with a phone-stored
+pairing key. The U300's Matter branch delegates control to the app's native
+`AHDoorLock.controlLockState` module. Its advertised commands are confirmed,
+but the native module's final authorization and request handling remain
+untraced. An HTTP success, advertised capability, and observed physical lock
+movement are separate checks.
 
-Downloaded from Aqara's own
+## Evidence and sources
+
+The international Android APK came from Aqara's own
 [download page](https://cdn.aqara.com/cdn/luoshu/mainland/static/app-download/index.html),
-which links the international APK at
-https://cdn.aqara.com/cdn/luoshu/mainland/static/app/aqara-home.apk.
+which links [aqara-home.apk](https://cdn.aqara.com/cdn/luoshu/mainland/static/app/aqara-home.apk).
+Static analysis used JADX 1.5.6 and APKTool 3.0.3.
 
 - Package: `com.lumiunited.aqarahome.play`.
-- Version: 6.4.0 (7011), the version served by that URL during inspection.
+- Version: 6.4.0 (7011), as served during inspection.
 - Size: 264,622,915 bytes.
 - SHA-256: `518e75081778234f193926450f03b602297a5fa1523a92513b4bb5cb36267bd4`.
 - Most Java implementations are behind SecNeo components, including
   `com.secneo.apkwrapper`, `libDexHelper`, `libdexjni`, and `libdatajar`.
-- `libdatajar.so` nevertheless contains readable API strings and lock class
-  names. The React Native base bundle contains Hermes bytecode.
+- The base React Native bundle contains Hermes bytecode. The separately
+  downloaded model plugins contain readable JavaScript.
 
-Route suffixes found below `/app/v1.0/lumi` include:
+The mobile plugin catalog identifies these model-specific packages:
 
-| Route | Evidence |
-| --- | --- |
-| `/user/guard-code/login` | APK string |
-| `/app/position/query/home/list` | APK string |
-| `/app/position/device/query` | APK string |
-| `/matter/write` | APK string |
-| `/dev/lock/query` | APK string |
-| `/dev/bluetooth/login/assure/publickey` | APK string |
-| `/dev/bluetooth/login/assure/verify` | APK string |
-| `/devex/lock/p2p/info` | APK string |
-| `/devex/lock/p2p/sign` | APK string |
+| Model | App model ID | Plugin version | Official download |
+| --- | --- | --- | --- |
+| U100 | `aqara.lock.acn10` | 1.0.484 | [Plugin archive](https://cdn.aqara.com/cdn/appadmin/mainland/rn/2adc1b53e6934655a69e5c8b30409056.zip) |
+| U300 | `aqara.matter.4447_10241` | 1.0.496 | [Plugin archive](https://cdn.aqara.com/cdn/appadmin/mainland/rn/4b91ea5820164459816f59dedbcd06bd.zip) |
 
-A string establishes a candidate route, not its method, payload, permissions,
-or behavior. The exact strings and offsets are recorded in the ignored
-`.cache/analysis-evidence.json`; some strings omit the leading slash.
+Archive SHA-256 values:
 
-## Independent implementation reviewed
+- U100: `4f625c2293ba64f3ac6b6696d9c9372251e938fd79961b306ef25823db6c8151`.
+- U300: `e88959678e097c1f6777c69bc8844e6b3a334944ae00704508d454b75560c8aa`.
 
-The community project
+The shared plugin source paths below identify the inspected modules. The
+proprietary archives and extracted source are not redistributed here.
+
+## Authentication and read-only queries
+
+All routes below use the regional host plus `/app/v1.0/lumi`.
+
+| Method | Route | Verification |
+| --- | --- | --- |
+| POST | `/user/guard-code/login` | Authenticated session obtained |
+| GET | `/app/position/query/home/list` | Home discovery succeeded |
+| GET | `/app/position/device/query` | Device/model discovery succeeded |
+| GET | `/app/dev/query/detail` | Model details returned |
+| GET | `/app/rn/latest/list` | Matching official model plugins located |
+| POST | `/res/query` | U100 lock-state resources returned |
+| GET | `/matter/dev/detail` | U300 endpoint/function/trait metadata returned |
+| POST | `/res/query/by/resourceId` | U300 numeric lock-state resource returned |
+
+The wire-format starting point was the MIT-licensed community project
 [aquara-local](https://github.com/home-assistant-plugins/aquara-local),
-commit `4fc274688cd40774307549172c9ae1db073c92ca`, is MIT licensed and
-unaffiliated with Aqara or Home Assistant. Its author reports cloud lock/unlock
-for the D100 through `/matter/write`; the README says that path does not
-unlock the A100 Pro. Its Python client uses a separate mobile-account session.
-Those claims were not tested on the user's hardware. LAN-control descriptions
-conflict across its documents, so LAN unlock remains unresolved.
+commit `4fc274688cd40774307549172c9ae1db073c92ca`, which is unaffiliated with
+Aqara or Home Assistant. Its
+[API reference](https://github.com/home-assistant-plugins/aquara-local/blob/4fc274688cd40774307549172c9ae1db073c92ca/docs/API.md)
+describes password encryption and signed requests. These formats have now
+been validated for authentication and the reads above:
 
-The [API reference](https://github.com/home-assistant-plugins/aquara-local/blob/4fc274688cd40774307549172c9ae1db073c92ca/docs/API.md)
-describes mobile login and signed requests. Its discovery and authentication
-route names match strings extracted from Aqara's APK. Matching routes do not
-validate its signing constants or command behavior for this app version.
+- Password: MD5 hex text, encrypted with RSA PKCS#1 v1.5, then Base64 encoded.
+- Signature: MD5 of the app ID, nonce, timestamp, optional nonempty session
+  token, request payload, and shared app key, in the expected order.
+- GET parameters are signed before URL encoding; POST parameters use compact
+  JSON. Field order is preserved.
+- Mobile sessions are separate from Aqara Agent bearer keys.
 
-## Next validation
+The reference's US hostname returned HTTP 500. Aqara's official
+[Android SDK region table](https://opendoc.aqara.com/docs/SDK开发/Android开发指南/地区对照表.html)
+and host strings in the APK identify `https://aiot-rpc-usa.aqara.com`.
+Authentication succeeds with that hostname. This is a generic routing fix,
+not an account-specific workaround.
 
-An Agent device-list response can expose endpoint ID/name, device name/type,
-and room name/ID without a hardware model. The generic DoorLock type does not
-establish which mobile control protocol to use. Obtain the exact hardware model
-from device information or authenticated mobile discovery.
+The reference app identity reports wire version 6.1.6, distinct from the
+inspected APK version 6.4.0. Successful reads validate that identity for those
+requests, without establishing control compatibility or future availability.
 
-A read-only mobile login and home/device-list probe can then establish account
-region, authentication compatibility, and actual model identifiers. The Agent
-bearer key is a separate credential. Any mobile secrets must be kept outside
-source control. An accepted request must not be described as confirmed physical
-lock movement without checking the resulting device state.
+## U100: encrypted remote-control branch
 
-Dynamic tracing and authenticated mobile replay have not been performed.
-Static APK inspection alone does not establish a working mobile session or
-validate a control payload. Private session tokens and account credentials
-must remain outside the repository, reports, and workflow release assets.
+Inspected shared modules include:
 
-## Model-specific checks
+- `Modules_common-lock-config/DeviceConfig/U100.ts`.
+- `Modules_common-lock-config/DeviceConfig/FeatureConfig/CommonConfig.ts`.
+- `src/Pages/Home/components/UnlockManager.ts`.
+- `Modules_common-lock/src/Pages/UserManagement/VistorPwd/RemoteHandler/RemoteHandlerManager.ts`.
+- `Modules_common-lock/src/Pages/RemoteGuidePage/RemoteFuncManager.ts`.
+- `Modules_common-lock/src/Bluetooth/LockSettingsBleHandler.ts`.
+- `Modules_common-lock/src/Http/ResourceHttpHandler.ts`.
 
-Aqara's [U100 FAQ](https://www.aqara.com/en/product/smart-lock-u100/faq/)
-documents Bluetooth 5.0 and Zigbee 3.0, and remote access through Aqara Home.
-Its mobile cloud-control payload still requires direct validation; the generic
-Agent control action table does not provide lock/unlock.
+The Zigbee remote branch requires the remote function to be enabled and the
+hub connection to be online. Its default control mode uses a Bluetooth-format
+command relayed over the `e2e_remote_tunnel` resource. The resource writer
+posts to `/res/write`, with `subjectId` and a `data` object.
 
-Aqara's [U300 announcement](https://www.aqara.com/en/?p=93236) identifies it
-as a lever lock for non-deadbolt doors with native Matter over Thread support.
-Native Matter support does not establish that Aqara's private mobile endpoint
-uses the same trait IDs, endpoint numbers, or authorization as the D100.
+Before writing, the app combines server time, the command, and a CRC16,
+encrypts them using its AES-256-CBC helper, then prefixes a key ID. The key
+and key ID are read through `AHEncryptUtil.queryKeyChainKeyValue`, using
+per-model/per-device names. The inspected setup path generates a key and
+provisions it through an authenticated Bluetooth exchange before storing it
+locally. Account login alone does not supply those values through this path.
 
-The D100 community implementation remains a model-specific lead. Its
-`2.148.35010.0` and `2.148.35011.0` traits must not be offered as generic
-lock/unlock commands for U100 or U300 without model-specific evidence.
-Next steps are a read-only mobile login and device discovery, followed by
-inspection of model capabilities and the matching app plugin or captured
-request. Command acceptance and observed lock movement are separate checks.
+No pairing key has been extracted, no Bluetooth pairing has been attempted,
+and no remote-function setting has been changed. A separate mobile control
+route could exist; the inspected branch does not establish one.
 
-## Read-only probe implementation
+The community D100 implementation reports `/matter/write` control with
+`pwd` and `type` fields. That report is model-specific and does not validate
+the same operation for U100.
 
-`tools/mobile_api.py` is an experimental standard-library client for validating
-the documented mobile sign-in and discovery wire formats. It permits only the
-login, home list, device list, device detail, and resource-query routes. Control
-routes and lock credential enumeration are rejected before any network request.
-HTTPS redirects are rejected; request failures expose numeric codes without
-server response messages. Passwords and session tokens are kept in memory.
+## U300: Matter capabilities and native authorization
 
-The `AppIdentity.from_reference()` loader reads literal app constants from the
-separately downloaded reference's `const.py` using Python's AST; it does not
-execute the reference code or embed shared app keys in this repository. The
-reference identifies its wire identity as app version 6.1.6. Acceptance by the
-current service remains unverified; this is separate from inspection of the
-official 6.4.0 APK. Every sign-in requires an explicit API area and country
-district. Authentication is not retried automatically.
+`Modules_common-lock-config/DeviceConfig/U300.ts` marks U300 as a Matter
+device. The shared Matter code uses:
 
-The module is excluded from the workflow release's explicit file allowlist.
-Its nine tests cover encryption, signing, reference parsing, session handling,
-the route allowlist, redirects, and safe failure messages. The complete suite
-passes 93 tests on Python 3.9 and 3.14. No authenticated result is claimed yet.
+- GET `/matter/dev/detail` with `did` and `fullValue=true`.
+- POST `/res/query/by/resourceId` with
+  `data: [{subjectId: did, options: [resourcePath]}]`.
+- A status resource path of `endpoint.function.trait.1`.
+- A command path of `endpoint.function.command.0`.
 
-APK, libraries, decoded resources, and third-party reference source are kept in
-`.cache/`, ignored by Git and excluded from Alfred releases. The installed
-workflow remains unchanged by this research.
+The trailing `.1` is required for the lock-state query: the shorter path
+returned an empty list. The plugin's `SpecUtil.getTraitSubscriptionPath`
+confirmed the correct form, and the corrected read returned a value.
+The DoorLock function is `148`, lock-state trait `32970`, lock command
+`35010`, and unlock command `35011`. The device detail advertises both
+commands. Endpoint numbers should come from device metadata rather than
+being assumed for every lock model.
+
+`RemoteUnLockPwdHandler.ts` delegates lock/unlock to native
+`AHDoorLock.controlLockState`, passing `did`, `model`, `cmdId`, and an empty
+JavaScript `value`. This does not prove that the eventual HTTP request has
+no additional authorization. The native implementation is protected in the
+APK and has not been dynamically traced.
+
+The same module contains a read-only password-state query at
+`/devex/device/pwd/state/query` and password-management writes at
+`/devex/lock/pwd`. None were called. In particular, its function named
+`validateDevicePassword` uses a password-change request; it must not be
+treated as a harmless read-only validation endpoint.
+
+## Probe, validation, and remaining work
+
+`tools/mobile_api.py` is an experimental standard-library client, excluded
+from the Alfred release. Its fixed route allowlist permits only sign-in,
+discovery, model-plugin lookup, and resource reads. Device writes and lock
+credential enumeration are rejected before any network request. Redirects
+are rejected and errors expose numeric codes without server messages.
+Credentials and session tokens remain in memory.
+
+`AppIdentity.from_reference()` reads literal constants from the separately
+downloaded reference's `const.py` using Python's AST. It never executes the
+reference or embeds its shared app keys in source control. Each sign-in
+requires an explicit API area and country district; authentication is not
+automatically retried.
+
+The ten probe tests cover encryption, signing, reference parsing, session
+handling, regional routing, Matter reads, the route allowlist, redirects,
+and safe errors. The full suite passes 94 tests on Python 3.9 and 3.14.
+
+Next work is to trace the native U300 authorization path and determine a
+supported way to provision or access U100's remote key. An instrumented
+Android runtime is not installed; no emulator traffic capture has occurred.
+Any eventual control test must distinguish request acceptance, reported
+state change, and physical movement. No lock/unlock command is exposed in
+the released workflow on the strength of static evidence alone.
+
+APK, decoded resources, proprietary plugins, and downloaded reference code
+remain in ignored `.cache/` storage and outside the release file allowlist.
+Private credential caches remain outside both repository checkouts.

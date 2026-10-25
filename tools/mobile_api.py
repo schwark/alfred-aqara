@@ -20,7 +20,8 @@ from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-HOSTS = {"SEA": "https://rpc-au.aqara.com", "US": "https://rpc-us.aqara.com",
+# Regional SDK routing: https://opendoc.aqara.com/docs/SDK开发/Android开发指南/地区对照表.html
+HOSTS = {"SEA": "https://rpc-au.aqara.com", "US": "https://aiot-rpc-usa.aqara.com",
          "EU": "https://rpc-ger.aqara.com", "KR": "https://rpc-kr.aqara.com",
          "CN": "https://aiot-rpc.ankasa.cn"}
 PREFIX = "/app/v1.0/lumi"
@@ -29,8 +30,12 @@ HOMES = "/app/position/query/home/list"
 DEVICES = "/app/position/device/query"
 DETAIL = "/app/dev/query/detail"
 RESOURCES = "/res/query"
+PLUGINS = "/app/rn/latest/list"
+MATTER_DETAIL = "/matter/dev/detail"
+MATTER_RESOURCES = "/res/query/by/resourceId"
 ALLOWED = {("POST", LOGIN), ("GET", HOMES), ("GET", DEVICES),
-           ("GET", DETAIL), ("POST", RESOURCES)}
+           ("GET", DETAIL), ("POST", RESOURCES), ("GET", PLUGINS),
+           ("GET", MATTER_DETAIL), ("POST", MATTER_RESOURCES)}
 MAX_RESPONSE = 4 * 1024 * 1024
 
 
@@ -179,3 +184,13 @@ class MobileClient:
     def status(self, device_id):
         return self._call("POST", RESOURCES, {"data": [{"subjectId": device_id,
                             "options": ["batt_0_remain_percentage", "lock_state", "device_offline_status"]}]})
+
+    def plugins(self, model):
+        return self._call("GET", PLUGINS, {"model": model})
+
+    def matter_details(self, device_id):
+        return self._call("GET", MATTER_DETAIL, {"did": device_id, "fullValue": "true"})
+
+    def matter_status(self, device_id, resources):
+        return self._call("POST", MATTER_RESOURCES, {"data": [{"subjectId": device_id,
+                            "options": list(resources)}]})
