@@ -1,10 +1,13 @@
 import json
+import gzip
+import hashlib
+import io
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from cloud_capabilities import compile_traits, panel_endpoints, trait_rows, trait_status, validate_control
+from cloud_capabilities import compile_traits, definition_endpoints, panel_endpoints, trait_rows, trait_status, validate_control
 from common import AqaraError, control_body, controls
 from mobile_backend import BackendClient, MobileStore, TRAIT_WRITE, capabilities
 from mobile_transport import AppIdentity, MobileAPIError, MobileClient
@@ -80,16 +83,61 @@ class CloudCapabilityTest(unittest.TestCase):
         self.assertEqual(set(endpoints[0]["cloud_controls"]), {"on", "off", "dim", "ct"})
         self.assertEqual(endpoints[0]["subject_key"], "example-endpoint")
 
-    def test_authentication_trait_takes_priority_over_plain_lock_commands(self):
+    def test_authenticated_trait_can_coexist_with_advertised_cloud_commands(self):
         matter = {"devices": [{"did": "example-device", "eps": [{"id": 2, "funcs": [{"id": 148,
             "cmds": [{"id": 35010}, {"id": 35011}], "traits": [{"id": 32970}, {"id": 40000}]}]}]}]}
-        self.assertEqual(capabilities(matter, "example-device")[0]["commands"], {})
+        self.assertEqual(set(capabilities(matter, "example-device")[0]["commands"]), {"lock", "unlock"})
         matter["devices"][0]["eps"][0]["funcs"][0]["traits"].pop()
         client = self.client()
         with patch.object(client, "panels", return_value=panel(["2.148.32970", "2.148.40000"])), patch.object(client, "traits", return_value=[]), patch.object(client, "matter_details", return_value=matter):
             endpoints, _ = client.endpoint_capabilities("example-device")
-        self.assertEqual(endpoints[0]["commands"], {})
-        self.assertTrue(endpoints[0]["requires_auth"])
+        self.assertEqual(set(endpoints[0]["commands"]), {"lock", "unlock"})
+        self.assertTrue(endpoints[0]["has_authenticated_route"])
+
+    def test_model_commands_require_live_device_state_and_support_zigbee_without_matter(self):
+        definitions = {"configs": [{"subjectModel": "example.lock", "endpoints": [{"endpointId": 2, "deviceTypes": "DoorLock", "functions": [{"functionId": 148,
+            "traitConfigList": [{"traitId": 32970, "traitType": 0, "access": 5},
+                                {"traitId": 40000, "traitType": 0, "access": 2},
+                                {"traitId": 35010, "traitType": 1}, {"traitId": 35011, "traitType": 1}]}]}]}]}
+        self.assertEqual(definition_endpoints(definitions, "unrecognized"), [])
+        client = self.client()
+        with patch.object(client, "definitions", return_value=definitions) as download, patch.object(client, "panels", return_value=[]), patch.object(client, "matter_details", side_effect=MobileAPIError("not Matter", 7167)), patch.object(client, "traits", return_value=[]) as read:
+            endpoints, _ = client.endpoint_capabilities("example-device", "example.lock")
+            self.assertEqual(endpoints[0]["commands"], {})
+            read.return_value = [{"deviceId": "example-device", "traits": [{"path": "2.148.32970", "value": "1"}]}]
+            endpoints, _ = client.endpoint_capabilities("example-device", "example.lock")
+            self.assertEqual(endpoints[0]["commands"], {"lock": "2.148.35010.0", "unlock": "2.148.35011.0"})
+            self.assertTrue(endpoints[0]["has_authenticated_route"])
+            download.assert_called_once()
+            read.return_value = [{"deviceId": "another-device", "traits": [{"path": "2.148.32970", "value": "1"}]}]
+            self.assertEqual(client.endpoint_capabilities("example-device", "example.lock")[0][0]["commands"], {})
+
+    def test_definition_download_is_bounded_and_does_not_forward_session_headers(self):
+        client = self.client()
+        raw = gzip.compress(json.dumps({"configs": []}).encode())
+        config = {"url": "https://aiot-example.s3.us-west-2.amazonaws.com/definitions.gzip", "md5": hashlib.md5(raw).hexdigest()}
+        opener = Mock()
+        opener.open.return_value = io.BytesIO(raw)
+        with patch.object(client, "_call", return_value=config), patch("mobile_transport.build_opener", return_value=opener):
+            self.assertEqual(client.definitions(), {"configs": []})
+        request = opener.open.call_args[0][0]
+        self.assertFalse(request.header_items())
+        for url in ("http://aiot-example.s3.us-west-2.amazonaws.com/x", "https://example.invalid/x", "https://user:password@aiot-example.s3.us-west-2.amazonaws.com/x"):
+            with patch.object(client, "_call", return_value=dict(config, url=url)), self.assertRaises(MobileAPIError):
+                client.definitions()
+        opener.open.return_value = io.BytesIO(raw + b"changed")
+        with patch.object(client, "_call", return_value=config), patch("mobile_transport.build_opener", return_value=opener), self.assertRaises(MobileAPIError):
+            client.definitions()
+
+    def test_semantic_enum_mapping_and_read_only_permissions_are_respected(self):
+        endpoint = {"endpoint": "2", "paths": ["2.132.32920"]}
+        traits = {"2.132.32920": {"semantic_enums": {"On": "0", "Off": "1"}, "access": 7}}
+        commands, _ = compile_traits(endpoint, traits)
+        self.assertEqual(validate_control(commands["on"]), "0")
+        status = trait_status([{"deviceId": "example-device", "traits": [{"path": "2.132.32920", "value": "0"}]}], "example-device", {"2.132.32920": "Power"}, {"2.132.32920": {"0": "On", "1": "Off"}})
+        self.assertEqual(status, {"Power": "On"})
+        traits["2.132.32920"]["access"] = 1
+        self.assertEqual(compile_traits(endpoint, traits)[0], {})
 
     def test_native_writer_cannot_be_used_for_arbitrary_or_lock_traits(self):
         client = self.client()
@@ -169,6 +217,7 @@ class CloudCapabilityTest(unittest.TestCase):
         store.mobile_client.return_value = client
         client.catalog.side_effect = [[{"homeId": "example-home"}], [{"did": "example-device", "parentDeviceId": "example-hub"}]]
         client.specification.return_value = {}
+        client.definitions.return_value = {"configs": []}
         client.panels.return_value = []
         client.details.return_value = {}
         client.matter_details.return_value = {}
@@ -180,7 +229,7 @@ class CloudCapabilityTest(unittest.TestCase):
         self.assertEqual(evidence["homes"][0]["gateways"][0]["device_id"], "example-hub")
         client.bridge_gateways.assert_called_once_with("example-device", "example-home")
         client.bridge_devices.assert_called_once_with("example-home", "example-hub")
-        self.assertTrue({c[0] for c in client.mock_calls}.issubset({"catalog", "specification", "panels", "details", "matter_details", "bridge_gateways", "gateway_details", "bridge_devices"}))
+        self.assertTrue({c[0] for c in client.mock_calls}.issubset({"catalog", "specification", "definitions", "panels", "details", "matter_details", "bridge_gateways", "gateway_details", "bridge_devices"}))
 
 
 if __name__ == "__main__":

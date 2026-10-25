@@ -3,20 +3,23 @@
 Wire-format reference: home-assistant-plugins/aquara-local at
 4fc274688cd40774307549172c9ae1db073c92ca (MIT). App constants are loaded from
 that separately obtained reference, never embedded here. Credentials and
-sessions stay in memory. Model-specific lock control remains unverified.
+sessions stay in memory. Runtime storage and capability-bound writes are
+implemented separately in mobile_backend.
 """
 
 import ast
 import base64
 from dataclasses import dataclass, field
 import hashlib
+import gzip
+import io
 import json
 from pathlib import Path
 import re
 import secrets
 import time
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from common import AqaraError
@@ -41,11 +44,13 @@ SPEC = "/app/aqara/spec/config"
 GATEWAY_DETAIL = "/dev/query/gateway/detail"
 BRIDGE_GATEWAYS = "/app/dev/matter/bridge"
 BRIDGE_DEVICES = "/app/dev/matter/bridge/subdevice"
+DEFINITION_URL = "/app/qlink/specf/config/url"
 ALLOWED = {("POST", LOGIN), ("GET", HOMES), ("GET", DEVICES),
            ("GET", DETAIL), ("POST", RESOURCES), ("GET", PLUGINS),
            ("GET", MATTER_DETAIL), ("POST", MATTER_RESOURCES),
            ("POST", TRAIT_READ), ("GET", PANELS), ("GET", SPEC),
-           ("GET", GATEWAY_DETAIL), ("POST", BRIDGE_GATEWAYS), ("POST", BRIDGE_DEVICES)}
+           ("GET", GATEWAY_DETAIL), ("POST", BRIDGE_GATEWAYS), ("POST", BRIDGE_DEVICES),
+           ("GET", DEFINITION_URL)}
 MAX_RESPONSE = 4 * 1024 * 1024
 
 
@@ -144,6 +149,7 @@ class MobileClient:
             payload = json.dumps(fields, separators=(",", ":"), ensure_ascii=True)
             data, query = payload.encode("utf-8"), ""
         else:
+            fields = dict(sorted(fields.items()))
             payload = "&".join(str(key) + "=" + str(value) for key, value in fields.items())
             data, query = None, "?" + urlencode(fields)
         nonce, timestamp = secrets.token_hex(16).upper(), str(int(time.time() * 1000))
@@ -214,6 +220,38 @@ class MobileClient:
     def specification(self):
         """Global semantics are reference data, never proof of device support."""
         return self._call("GET", SPEC, {})
+
+    def definitions(self):
+        """Download the app's server-maintained endpoint definitions as data.
+
+        The API supplies a gzip URL and MD5. The CDN request receives no app
+        identity, account token, or cookies, and cannot follow redirects.
+        """
+        config = self._call("GET", DEFINITION_URL, {})
+        if not isinstance(config, dict) or not isinstance(config.get("url"), str):
+            raise MobileAPIError("The cloud endpoint definitions are unavailable.")
+        url = urlsplit(config["url"])
+        host = url.hostname or ""
+        allowed = host.endswith((".aqara.com", ".aqara.cn")) or (
+            host.startswith("aiot-") and host.endswith((".amazonaws.com", ".myqcloud.com")))
+        if (url.scheme != "https" or not allowed or url.username or url.password or url.port not in (None, 443)
+                or not re.fullmatch(r"[a-fA-F0-9]{32}", str(config.get("md5", "")))):
+            raise MobileAPIError("The definition download address or checksum is invalid.")
+        try:
+            with build_opener(NoRedirects()).open(Request(config["url"]), timeout=20) as response:
+                raw = response.read(8 * 1024 * 1024 + 1)
+            if len(raw) > 8 * 1024 * 1024 or hashlib.md5(raw).hexdigest().lower() != config["md5"].lower():
+                raise MobileAPIError("The definition download failed its size or checksum check.")
+            with gzip.GzipFile(fileobj=io.BytesIO(raw)) as stream:
+                data = stream.read(32 * 1024 * 1024 + 1)
+            if len(data) > 32 * 1024 * 1024:
+                raise MobileAPIError("The endpoint definitions exceed the supported size.")
+            value = json.loads(data)
+            if not isinstance(value, dict) or not isinstance(value.get("configs"), list):
+                raise MobileAPIError("The endpoint definitions have an unexpected shape.")
+            return value
+        except (OSError, URLError, ValueError, EOFError):
+            raise MobileAPIError("The cloud endpoint definitions could not be downloaded or decoded.") from None
 
     def gateway_details(self, device_id):
         return self._call("GET", GATEWAY_DETAIL, {"deviceId": device_id})

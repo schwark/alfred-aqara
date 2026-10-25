@@ -16,7 +16,7 @@ traits. **This is not yet a complete mobile-only replacement.**
 ```sh
 python3 -m unittest discover -s tests -v
 python3 workflow-build --mobile
-open dist/Aqara-Mobile-0.3.0-mobile.1.alfredworkflow
+open dist/Aqara-Mobile-0.3.0-mobile.2.alfredworkflow
 ```
 
 1. Run `aqm import` before configuring any accounts. It copies the current
@@ -41,6 +41,10 @@ open dist/Aqara-Mobile-0.3.0-mobile.1.alfredworkflow
    Repeat mobile login for each imported account/region. `aqm account add
    <label>` also supports a new mobile-only connection. `aqm apikey` connects
    an Agent fallback to an existing profile.
+6. If Agent and mobile home IDs differ, select the Agent home, then use
+   `aqm home link` to select its mobile counterpart. Run `aqm update` afterward.
+   `aqm home unlink` removes that explicit association. Names do not create
+   links automatically.
 
 The runtime still needs only Python 3.9+ and its standard library. Emulator,
 Frida, mitmproxy, APKs, and the research tools are not runtime dependencies.
@@ -54,11 +58,11 @@ Frida, mitmproxy, APKs, and the research tools are not runtime dependencies.
 | Lights, switches, curtains, AC controls | Existing Agent routes retained after import; matched endpoints may use common native power, brightness, and color-temperature traits |
 | Existing scenes | Existing Agent route retained |
 | Additional mobile scenes | App scene list and execution route; construction verified in app code, live execution unverified |
-| Mobile lock/unlock | Per-device DoorLock command metadata plus common `/matter/write` request |
+| Mobile lock/unlock | Common `/matter/write` request; U100 and U300 unlock/lock verified with reported-state changes |
 | Other mobile-only devices | Known trait status, power, brightness, and color temperature where advertised; unknown capabilities remain read-only |
 | Workflow updates | Same verified updater, isolated to `Aqara-Mobile-*` assets; mobile prereleases enabled |
 
-Homes are associated across APIs only by an exact home ID. Devices are
+Homes are associated by an exact home ID or an explicit saved home link. Devices are
 associated only by an exact device ID or a unique returned endpoint `subjectKey`
 matching the Agent endpoint ID. Similar names are never used to route
 a write. Unmatched mobile devices remain separate entries; a matching display
@@ -77,7 +81,9 @@ not establish that hub control requires phone-to-lock pairing. See the
 [M3 hub research](https://github.com/schwark/alfred-aqara/blob/codex/aqara-mobile-api/docs/aqara-hub-api-research.md).
 The experiment reads endpoint panels and traits for Zigbee/hub devices as well
 as Matter metadata. Its native writer uses the regional cloud endpoints;
-LANLink control is not a dependency. Actual hub execution remains to be tested.
+LANLink control is not a dependency. The U100 and U300 have both accepted
+Unlock followed by Lock through this shared cloud API, with matching
+status readback.
 
 ## Lock behavior and limitations
 
@@ -88,28 +94,30 @@ POST /app/v1.0/lumi/matter/write
 {did, pwd, data: {"<endpoint>.148.<command>.0": ""}, type: 0}
 ```
 
-Only `35010` (lock) and `35011` (unlock) are supported. The workflow discovers
-the endpoint and supported commands from **that device's** `/matter/dev/detail`
-response, and checks them again at execution. It does not infer capabilities
-from a model name, another lock, or the global specification.
-If either returned endpoint schema advertises `RemoteControlWithAuthCode`,
-plain lock commands are withheld: the app prioritizes the authenticated route,
-and that route has not been validated by this workflow.
+Only `35010` (lock) and `35011` (unlock) are supported. Matter devices advertise
+commands through `/matter/dev/detail`. Zigbee devices use Aqara's downloaded
+endpoint definitions for their inventory model, confirmed by a live device
+LockState trait read. Definitions come from Aqara's current gzip data rather
+than bundled per-model drivers. A global command list alone is insufficient.
+Execution rechecks the device's model, home, exact endpoint, and capabilities.
+The U100 can expose `RemoteControlWithAuthCode` alongside these working cloud
+commands; that trait's presence does not invalidate the shared command route.
 
-Selecting a lock action requests the device's separate remote-control password
-in a hidden dialog. Leave it empty if no password is configured. A nonempty
+When device metadata says no remote-control password is configured, commands
+use an empty password. Otherwise a hidden dialog requests this separate
+device password; leave it empty if none is configured. A nonempty
 password is encoded as the lowercase MD5 expected by the shared app helper;
 it is not saved. Cancel sends no write. A server rejection or timeout sends no
 retry and does not fall back to a second transport. Notification text describes
 the request; it does not claim the physical lock changed state.
 
-**Live lock execution has not been verified.** App-code request construction
-and read-only capability/status discovery are the evidence so far. U300 uses
-the shared Matter path in the app. U100's normal plugin path uses a paired
-encrypted tunnel; pairing/key provisioning and that legacy transport are not
-implemented. A device without advertised common lock commands remains
-read-only. Full native parity, including U100 control, is an open result of
-the experiment rather than a claim made by this build.
+Live tests sent one Unlock and one Lock to each tested model. Both requests
+were accepted and fresh reads confirmed the requested states. No paired
+phone key was used for the tested U100 cloud route. The app's separate
+encrypted-plugin branch remains documented, but is not needed for this route.
+Other device/firmware combinations are not proven by those tests. A device
+without declared common commands and matching live metadata remains read-only.
+Full mobile-only parity still needs Agent fallback for unsupported commands.
 
 Browsing, refresh, import, and parity inspection never issue device writes.
 Lock commands and scene runs occur only after selecting their Alfred actions.

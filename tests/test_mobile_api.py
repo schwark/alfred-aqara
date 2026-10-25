@@ -82,6 +82,16 @@ class MobileAPITest(unittest.TestCase):
         with self.assertRaises(MobileAPIError):
             MobileClient(self.identity, 'https://example.invalid', 'US')
 
+    def test_get_query_signing_is_canonical_regardless_of_caller_field_order(self):
+        self.client.token = 'example-token'
+        self.response({'code': 0, 'result': []})
+        with patch('tools.mobile_api.secrets.token_hex', return_value='a' * 32), patch('tools.mobile_api.time.time', return_value=123):
+            self.client._call('GET', '/app/position/device/query', {'startIndex': 0, 'size': 300, 'positionId': 'example home'})
+        request = self.opener.open.call_args[0][0]
+        self.assertTrue(request.full_url.endswith('?positionId=example+home&size=300&startIndex=0'))
+        self.assertEqual(request.get_header('Sign'), signature(self.identity, 'A' * 32, '123000', 'example-token',
+                         'positionId=example home&size=300&startIndex=0'))
+
     def test_matter_queries_use_device_endpoint_metadata_and_read_route(self):
         self.client.token = 'example-token'
         self.response({'code': 0, 'result': {'endpoints': []}})

@@ -58,7 +58,8 @@ class MobileBackendTest(unittest.TestCase):
         self.mobile.matter_details.return_value = detail()
         self.mobile.panels.return_value = []
         self.mobile.traits.return_value = []
-        self.mobile.endpoint_capabilities.side_effect = lambda did: BackendClient.endpoint_capabilities(self.mobile, did)
+        self.mobile.model_endpoints.return_value = []
+        self.mobile.endpoint_capabilities.side_effect = lambda did, model="": BackendClient.endpoint_capabilities(self.mobile, did, model)
         self.action = {"action": "control", "profile_id": "default", "home_id": "example-home",
                        "id": self.device["id"], "command": "unlock", "value": ""}
         self.updater = Mock()
@@ -85,6 +86,13 @@ class MobileBackendTest(unittest.TestCase):
             message = command.execute(self.action, self.store)
         self.assertEqual(message, "Requesting Entry Lock to unlock.")
         self.mobile.matter_details.assert_called_once_with("example-device")
+        self.mobile.write_lock.assert_called_once_with("example-device", "7.148.35011.0", "")
+
+    def test_no_device_password_metadata_skips_the_password_dialog(self):
+        self.device["pwd_state"] = 0
+        with patch.object(self.store, "mobile_client", return_value=self.mobile), patch("mobile_backend.dialog") as prompt:
+            self.store.control(self.device, "unlock")
+        prompt.assert_not_called()
         self.mobile.write_lock.assert_called_once_with("example-device", "7.148.35011.0", "")
 
     def test_changed_capabilities_or_wrong_home_never_write(self):
@@ -129,7 +137,7 @@ class MobileBackendTest(unittest.TestCase):
         source.write("settings", {"home_id": "example-home", "home_name": "Example Home", "showstatus": True,
                                   "homes": [{"id": "example-home", "name": "Example Home"}]})
         catalog = {"home_id": "example-home", "devices": normalize([{"endpoint_id": "example-light", "device_name": "Desk Light", "device_type": "DimmableLight"}], "devices"),
-                   "scenes": normalize([{"scene_id": "example-scene", "name": "Evening"}], "scenes")}
+                   "scenes": normalize([{"scene_id": "example-scene", "name": "Example Scene One"}], "scenes")}
         source.write("catalog", catalog)
         before = (source.directory / "settings.json").read_bytes()
         empty = MobileStore(Path(self.temp.name) / "import", keychain_factory=self.factory)
@@ -155,10 +163,10 @@ class MobileBackendTest(unittest.TestCase):
         agent.request.side_effect = [[{"positionId": "example-home", "positionName": "Example Home"}],
                                     [{"endpoint_id": "agent-lock", "device_name": "Entry Lock", "device_type": "DoorLock"},
                                      {"endpoint_id": "agent-light", "device_name": "Desk Light", "device_type": "DimmableLight"}],
-                                    [{"scene_id": "agent-scene", "scene_name": "Evening"}]]
+                                    [{"scene_id": "agent-scene", "scene_name": "Example Scene One"}]]
         self.mobile.catalog.side_effect = [[{"homeId": "example-home", "homeName": "Example Home"}],
                                          [{"did": "example-device", "deviceName": "Entry Lock", "model": "example-model"}],
-                                         [{"sceneId": "native-scene", "name": "Morning"}]]
+                                         [{"sceneId": "native-scene", "name": "Example Scene Two"}]]
         with patch.object(self.store, "client", return_value=agent), patch.object(self.store, "mobile_client", return_value=self.mobile):
             self.store.refresh()
         catalog = self.store.read("catalog")
@@ -205,6 +213,49 @@ class MobileBackendTest(unittest.TestCase):
         with patch.object(self.store, "mobile_client", return_value=self.mobile):
             items = build_items("Desk Light status", self.store, self.updater)
         self.assertEqual(items[0]["subtitle"], "Power: On")
+
+    def test_home_ids_are_linked_only_by_explicit_selection_and_can_be_unlinked(self):
+        self.values["default"] = json.dumps({"agent_key": "example-key", "token": "example-token"})
+        agent = Mock()
+        agent.request.return_value = [{"home_id": "example-home", "home_name": "Example Home"}]
+        self.mobile.catalog.return_value = [{"homeId": "native-home", "homeName": "Example Home"}]
+        with patch.object(self.store, "client", return_value=agent), patch.object(self.store, "mobile_client", return_value=self.mobile):
+            self.assertEqual(len(self.store.discover_homes()), 2)
+            items = build_items("home link", self.store, self.updater)
+            action = json.loads(items[0]["arg"])
+            self.assertEqual(action["mobile_home_id"], "native-home")
+            command.execute(action, self.store)
+            homes = self.store.discover_homes()
+            self.assertEqual(len(homes), 1)
+            self.assertEqual(homes[0]["id"], "example-home")
+            self.assertEqual(homes[0]["mobile_id"], "native-home")
+            self.store.link_home("example-home", None)
+            self.assertEqual(len(self.store.discover_homes()), 2)
+            with self.assertRaises(AqaraError):
+                self.store.link_home("example-home", "unavailable-home")
+            with self.assertRaises(AqaraError):
+                command.execute(dict(action, home_id="stale-home"), self.store)
+
+    def test_native_command_rechecks_model_home_and_home_link_before_writing(self):
+        self.device["model"] = "example.lock"
+        self.mobile.details.return_value = [{"did": "example-device", "model": "example.lock", "homeId": "example-home"}]
+        with patch.object(self.store, "mobile_client", return_value=self.mobile), patch("mobile_backend.dialog", return_value=""):
+            self.store.control(self.device, "lock")
+        self.mobile.write_lock.assert_called_once_with("example-device", "7.148.35010.0", "")
+        self.mobile.reset_mock()
+        self.mobile.details.return_value[0]["homeId"] = "other-home"
+        with patch.object(self.store, "mobile_client", return_value=self.mobile), self.assertRaises(AqaraError):
+            self.store.control(self.device, "lock")
+        self.mobile.write_lock.assert_not_called()
+        self.mobile.details.return_value[0]["homeId"] = "example-home"
+        def relink(*args, **kwargs):
+            settings = self.store.read("settings")
+            settings["home_links"] = {"example-home": "other-home"}
+            self.store.write("settings", settings)
+            return ""
+        with patch.object(self.store, "mobile_client", return_value=self.mobile), patch("mobile_backend.dialog", side_effect=relink), self.assertRaises(AqaraError):
+            self.store.control(self.device, "unlock")
+        self.mobile.write_lock.assert_not_called()
 
     def test_reconnection_failure_keeps_credentials_and_current_catalog(self):
         self.values["default"] = json.dumps({"agent_key": "old-example-key"})

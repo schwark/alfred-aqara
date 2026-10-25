@@ -14,7 +14,7 @@ import subprocess
 import time
 
 from common import AqaraError, Client, Store, control_body, controls, normalize
-from cloud_capabilities import (compile_traits, objects, panel_endpoints, trait_rows,
+from cloud_capabilities import (compile_traits, definition_endpoints, objects, panel_endpoints, trait_rows,
                                 trait_status, validate_control)
 from keychain import Keychain
 from mobile_transport import ALLOWED, AppIdentity, MobileAPIError, MobileClient
@@ -111,7 +111,21 @@ class BackendClient(MobileClient):
         wire_value = validate_control(spec, value)
         return self._call("POST", TRAIT_WRITE, {"deviceId": did, "traits": [{"path": path, "value": wire_value}]})
 
-    def endpoint_capabilities(self, did):
+    def model_endpoints(self, model):
+        cache_path = getattr(self, "definition_cache", None)
+        cached = Store._read_path(cache_path) if cache_path else {}
+        value = getattr(self, "_definitions", None)
+        if value is None:
+            if time.time() - cached.get("updated", 0) < 86400 and isinstance(cached.get("data"), dict):
+                value = cached["data"]
+            else:
+                value = self.definitions()
+                if cache_path:
+                    Store._write_path(cache_path, {"updated": time.time(), "data": value})
+            self._definitions = value
+        return definition_endpoints(value, model)
+
+    def endpoint_capabilities(self, did, model=""):
         """Read both shared schemas; one unavailable schema does not erase the other."""
         panels, matter, failures = [], [], 0
         try:
@@ -123,15 +137,26 @@ class BackendClient(MobileClient):
         except MobileAPIError:
             failures += 1
         by_ep = {c["endpoint"]: dict(c) for c in matter}
+        seeds = []
+        if model:
+            try:
+                seeds = self.model_endpoints(model)
+            except MobileAPIError:
+                failures += 1
+        for seed in seeds:
+            entry = by_ep.setdefault(seed["endpoint"], {"endpoint": seed["endpoint"], "commands": {}, "readings": {}})
+            entry.update(seed)
         for panel in panels:
             entry = by_ep.setdefault(panel["endpoint"], {"endpoint": panel["endpoint"], "commands": {}, "readings": {}})
+            paths = set(entry.get("paths", [])) | set(panel["paths"])
             entry.update(panel)
-            # The app prioritizes authenticated remote control over the simple
-            # command path. Presence of that trait must not be bypassed.
-            if any(path.endswith(".148.40000") for path in panel["paths"]):
-                entry["commands"] = {}
-                entry["requires_auth"] = True
-        paths = sorted({p for panel in panels for p in panel["paths"]})
+            entry["paths"] = sorted(paths)
+        for entry in by_ep.values():
+            # The authenticated trait can coexist with standard cloud commands.
+            # Its presence does not imply those advertised commands are invalid.
+            if any(path.endswith(".148.40000") for path in entry.get("paths", [])):
+                entry["has_authenticated_route"] = True
+        paths = sorted({p for entry in by_ep.values() for p in entry.get("paths", [])})
         traits = {}
         for start in range(0, len(paths), 300):
             page = paths[start:start + 300]
@@ -140,7 +165,14 @@ class BackendClient(MobileClient):
             except MobileAPIError:
                 failures += 1
         for entry in by_ep.values():
-            entry["cloud_controls"], entry["trait_readings"] = compile_traits(entry, traits)
+            combined = {p: dict(entry.get("seed_traits", {}).get(p, {}), **row) for p, row in traits.items()}
+            lock_state = traits.get(entry["endpoint"] + ".148.32970", {})
+            if str(lock_state.get("value")) in ("0", "1", "2"):
+                entry["commands"].update(entry.get("definition_commands", {}))
+            entry["cloud_controls"], entry["trait_readings"] = compile_traits(entry, combined)
+            commands = entry["cloud_controls"]
+            entry["trait_values"] = ({commands["on"]["path"]: {commands["on"]["value"]: "On", commands["off"]["value"]: "Off"}}
+                                     if "on" in commands and "off" in commands else {})
         return list(by_ep.values()), failures
 
 
@@ -157,7 +189,7 @@ def capabilities(payload, did):
             if not isinstance(endpoint, dict) or not re.fullmatch(r"\d+", str(endpoint.get("id", ""))):
                 continue
             ep = str(endpoint["id"])
-            commands, readings, requires_auth = {}, {}, False
+            commands, readings = {}, {}
             for function in objects(endpoint.get("funcs")):
                 if str(function.get("id")) != "148":
                     continue
@@ -169,10 +201,6 @@ def capabilities(payload, did):
                     name = {"32970": "Lock", "32971": "Door"}.get(str(trait.get("id")))
                     if name:
                         readings[ep + ".148." + str(trait["id"]) + ".1"] = name
-                if any(str(t.get("id")) == "40000" for t in objects(function.get("traits"))):
-                    requires_auth = True
-            if requires_auth:
-                commands = {}
             if commands or readings:
                 result.append({"endpoint": ep, "commands": commands, "readings": readings})
     return result
@@ -248,6 +276,7 @@ class MobileStore(Store):
             raise AqaraError("Connect the mobile account with aqm login first.")
         client = BackendClient(load_identity(), value.get("area", ""), value.get("district", ""))
         client.token, client.user_id = value["token"], value["user_id"]
+        client.definition_cache = self.directory / "definitions.json"
         return client
 
     def client(self):
@@ -259,13 +288,18 @@ class MobileStore(Store):
 
     def discover_homes(self, client=None):
         value, homes = self.secrets(), []
+        settings = self.read("settings")
+        links = settings.get("home_links", {})
         if value.get("agent_key"):
             for home in normalize((client or self.client()).request("homes/query"), "homes"):
                 homes.append(dict(home, agent=True))
         if value.get("token"):
             for row in self.mobile_client().catalog("homes"):
                 identifier = str(row.get("homeId") or row["positionId"])
-                existing = next((home for home in homes if home["id"] == identifier), None)
+                matches = [home for home in homes if home["id"] == identifier or links.get(home["id"]) == identifier]
+                if len(matches) > 1:
+                    raise AqaraError("A mobile home is linked more than once. Remove the duplicate home link.")
+                existing = matches[0] if matches else None
                 if existing:
                     existing["mobile_id"] = identifier
                 else:
@@ -275,7 +309,6 @@ class MobileStore(Store):
                     homes.append({"id": "mobile:" + identifier, "mobile_id": identifier, "name": name})
         if not homes:
             raise AqaraError("No homes found. Connect the mobile account with aqm login or import Agent profiles.")
-        settings = self.read("settings")
         if not any(home["id"] == settings.get("home_id") for home in homes):
             settings.pop("home_id", None)
             settings.pop("home_name", None)
@@ -288,6 +321,26 @@ class MobileStore(Store):
         self.write("catalogs", {key: val for key, val in self.read("catalogs").items()
                                  if key in {home["id"] for home in homes}})
         return homes
+
+    def link_home(self, agent_id, mobile_id=None):
+        settings = self.read("settings")
+        if not any(h["id"] == agent_id and h.get("agent") for h in settings.get("homes", [])):
+            raise AqaraError("Choose an Agent home before linking its mobile counterpart.")
+        if mobile_id is not None:
+            ids = {str(h.get("homeId") or h.get("positionId")) for h in self.mobile_client().catalog("homes")}
+            if mobile_id not in ids:
+                raise AqaraError("The mobile home is no longer available in this account.")
+        links = dict(settings.get("home_links", {}))
+        if mobile_id is None:
+            links.pop(agent_id, None)
+        else:
+            if any(value == mobile_id and key != agent_id for key, value in links.items()):
+                raise AqaraError("This mobile home is already linked to another Agent home.")
+            links[agent_id] = mobile_id
+        settings["home_links"] = links
+        self.write("settings", settings)
+        self.clear_catalog()
+        return "Home link saved. Run aqm update." if mobile_id else "Home link removed. Run aqm update."
 
     def refresh(self, client=None):
         self.discover_homes(client)
@@ -308,7 +361,7 @@ class MobileStore(Store):
                 did = str(row["did"])
                 # Query common capabilities for every device. No model whitelist.
                 try:
-                    caps, failures = mobile.endpoint_capabilities(did)
+                    caps, failures = mobile.endpoint_capabilities(did, str(row.get("model") or ""))
                     native_failures += bool(failures)
                 except MobileAPIError:
                     caps = []
@@ -319,11 +372,13 @@ class MobileStore(Store):
                     if len(endpoints) > 1 and not cap.get("name"):
                         name += " · Endpoint " + cap["endpoint"]
                     device = {"id": "mobile:" + did + ("#" + cap["endpoint"] if cap["endpoint"] else ""),
-                              "did": did, "endpoint": cap["endpoint"], "name": name, "device_name": name,
+                              "did": did, "model": str(row.get("model") or ""), "pwd_state": row.get("pwdState"),
+                              "endpoint": cap["endpoint"], "name": name, "device_name": name,
                               "room": str(row.get("positionName") or ""), "kind": "device", "backend": "mobile",
                               "type": cap.get("type") or ("DoorLock" if cap["commands"] or cap["readings"] or any(".148." in p for p in cap.get("paths", [])) else str(row.get("model") or "Device")),
                               "mobile_commands": cap["commands"], "mobile_readings": cap["readings"],
                               "cloud_controls": cap.get("cloud_controls", {}), "trait_readings": cap.get("trait_readings", {}),
+                              "trait_values": cap.get("trait_values", {}),
                               "lock_note": "This endpoint needs an authenticated lock-control route; it has not been validated yet"}
                     # Merge only an exact identifier; never associate a write by name.
                     subject_key = cap.get("subject_key")
@@ -343,8 +398,11 @@ class MobileStore(Store):
             for row in native_scenes:
                 identifier = str(row["sceneId"])
                 if not any(scene["id"] == identifier for scene in scenes):
+                    name = str(row.get("sceneName") or row.get("name") or "Scene")
+                    if any(s["name"].casefold() == name.casefold() for s in scenes):
+                        name += " (Mobile)"
                     scenes.append({"id": "mobile:" + identifier, "scene_id": identifier, "backend": "mobile",
-                                   "name": str(row.get("sceneName") or row.get("name") or "Scene"),
+                                   "name": name,
                                    "room": str(row.get("positionName") or ""), "kind": "scene"})
         else:
             native_scenes = []
@@ -374,7 +432,7 @@ class MobileStore(Store):
         paths = device.get("mobile_readings", {})
         trait_paths = device.get("trait_readings", {})
         if trait_paths:
-            data = trait_status(mobile.traits(device["did"], trait_paths), device["did"], trait_paths)
+            data = trait_status(mobile.traits(device["did"], trait_paths), device["did"], trait_paths, device.get("trait_values"))
         elif not paths and device.get("agent_fallback"):
             return super().status(device["agent_fallback"], client=None)
         else:
@@ -399,16 +457,27 @@ class MobileStore(Store):
             if fallback:
                 return super().control(fallback, command, value)
             raise AqaraError("This device does not support that native command.")
-        scope = self.read("settings").get("home_id")
+        def current_scope():
+            settings = self.read("settings")
+            home = next((h for h in settings.get("homes", []) if h["id"] == settings.get("home_id")), {})
+            return settings.get("home_id"), settings.get("home_links", {}).get(home.get("id"), home.get("mobile_id"))
+        scope = current_scope()
         mobile = self.mobile_client()
+        if device.get("model"):
+            details = [row for row in objects(mobile.details(device["did"])) if str(row.get("did", "")) == device["did"]]
+            if (len(details) != 1 or details[0].get("model") != device["model"] or not scope[1]
+                    or str(details[0].get("homeId", "")) != scope[1]):
+                raise AqaraError("This device's home or model changed. Run aqm update before trying again.")
         # Re-read capabilities at execution, including exact endpoint, before any write.
-        fresh = next((c for c in mobile.endpoint_capabilities(device["did"])[0]
+        fresh_caps = (mobile.endpoint_capabilities(device["did"], device["model"])
+                      if device.get("model") else mobile.endpoint_capabilities(device["did"]))
+        fresh = next((c for c in fresh_caps[0]
                       if c["endpoint"] == device.get("endpoint")), {})
         if body.get("attribute") == "native_trait":
             spec = fresh.get("cloud_controls", {}).get(command)
             if not spec or spec != device.get("cloud_controls", {}).get(command):
                 raise AqaraError("This device's capabilities changed. Run aqm update before trying again.")
-            if self.active_profile_id() != self.profile_id or self.read("settings").get("home_id") != scope:
+            if self.active_profile_id() != self.profile_id or current_scope() != scope:
                 raise AqaraError("The selected home changed. Select the device again.")
             try:
                 mobile.write_trait(device["did"], spec, value)
@@ -418,11 +487,12 @@ class MobileStore(Store):
         path = fresh.get("commands", {}).get(command)
         if not path or path != device.get("mobile_commands", {}).get(command):
             raise AqaraError("This lock's capabilities changed. Run aqm update before trying again.")
-        password = dialog("Enter this device's remote-control password, or leave blank if none is configured. "
-                          "This is separate from your Aqara account password.", hidden=True)
+        password = ("" if device.get("pwd_state") == 0 else
+                    dialog("Enter this device's remote-control password, or leave blank if none is configured. "
+                           "This is separate from your Aqara account password.", hidden=True))
         if password is None:
             raise AqaraError("Lock command cancelled.")
-        if self.active_profile_id() != self.profile_id or self.read("settings").get("home_id") != scope:
+        if self.active_profile_id() != self.profile_id or current_scope() != scope:
             raise AqaraError("The selected home changed. Select the lock again.")
         try:
             mobile.write_lock(device["did"], path, password)
@@ -503,6 +573,13 @@ class MobileStore(Store):
 
     def handle_action(self, action):
         name = action.get("action")
+        if name in ("mobile_home_link", "mobile_home_unlink"):
+            if (action.get("profile_id") != self.profile_id or self.active_profile_id() != self.profile_id
+                    or action.get("home_id") != self.read("settings").get("home_id")):
+                raise AqaraError("The selected account or home changed. Choose the home link again.")
+            if name == "mobile_home_link" and not isinstance(action.get("mobile_home_id"), str):
+                raise AqaraError("Select a mobile home to link.")
+            return self.link_home(action["home_id"], action.get("mobile_home_id") if name == "mobile_home_link" else None)
         if name == "mobile_import":
             return self.import_agent()
         if name == "mobile_identity":
@@ -542,6 +619,20 @@ class MobileStore(Store):
     def decorate_items(self, query, items):
         from filter import item
         term = query.strip().casefold()
+        if term in ("home link", "home unlink"):
+            settings = self.read("settings")
+            current = next((h for h in settings.get("homes", []) if h["id"] == settings.get("home_id")), {})
+            if not current.get("agent"):
+                return [item("Choose an Agent home first", "Then use aqm home link to select its mobile counterpart", autocomplete="home ")]
+            action = {"profile_id": self.profile_id, "home_id": current["id"]}
+            if term == "home unlink":
+                return [item("Remove this home link", current["name"], dict(action, action="mobile_home_unlink"))]
+            choices = [h for h in settings.get("homes", []) if h.get("mobile_id") and not h.get("agent")]
+            return [item("Link " + h["name"], "Keep Agent controls and add native devices in " + current["name"],
+                         dict(action, action="mobile_home_link", mobile_home_id=h["mobile_id"])) for h in choices] or [
+                item("No unlinked mobile homes", "Use aqm login and aqm update first, or aqm home unlink to change a link")]
+        if term in ("home", "homes") and self.secrets().get("token"):
+            items.append(item("Link a mobile home…", "Associate different API IDs explicitly", autocomplete="home link"))
         if term == "parity":
             catalog = self.read("catalog")
             devices = catalog.get("devices", [])
@@ -549,12 +640,12 @@ class MobileStore(Store):
             locks = [d for d in native if any(c in controls(d) for c in ("lock", "unlock"))]
             fallback = [d for d in devices if d.get("backend") != "mobile" or d.get("agent_fallback")]
             native_controls = [d for d in native if d.get("cloud_controls")]
-            return [item("Mobile command coverage", "%s endpoints advertise lock commands · Execution remains unverified until you test" % len(locks)),
+            return [item("Mobile command coverage", "%s endpoints advertise lock commands · Shared cloud route verified with U100 and U300" % len(locks)),
                     item("Agent fallback", "%s endpoints retain their existing commands and scenes" % len(fallback)),
                     item("Native device controls", "%s endpoints advertise common power, brightness, or color-temperature traits" % len(native_controls)),
-                    item("Native coverage gaps", "Unsupported controls retain Agent fallback where matched; authenticated lock routes remain under investigation"),
+                    item("Native coverage gaps", "Unsupported controls retain Agent fallback; devices without common commands remain read-only"),
                     item("Native scenes", "%s discovered · Native scenes use the app API; existing Agent scenes retain their route" % catalog.get("native_scene_count", 0)),
-                    item("Capability reads unavailable", "%s devices · No control capability was guessed" % catalog.get("native_capability_failures", 0))]
+                    item("Partial metadata reads", "%s devices have an unavailable metadata route" % catalog.get("native_capability_failures", 0))]
         extra = [("import", "Import current Agent profiles", "Copy accounts and cached catalogs; keep the aq workflow separate", "mobile_import"),
                  ("identity", "Import mobile app identity", "Read a separately obtained constant reference into Keychain", "mobile_identity"),
                  ("parity", "Compare mobile coverage", "Show mobile lock commands and Agent fallback coverage", None)]

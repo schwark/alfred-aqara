@@ -65,11 +65,12 @@ API class remains only a lead; M3 compatibility and request semantics were not
 established.
 
 For this workflow, cloud capability discovery and hub-executed operations take
-priority. The U100's inspected `RemoteControlWithAuthCode` branch can still
-require phone-held material even when delivered through the cloud. We must
-determine whether the owning hub exposes another authorized operation; cloud
-relay by itself does not prove that requirement disappears. No lock command
-was sent during this investigation.
+priority. The U100's inspected `RemoteControlWithAuthCode` branch can require
+phone-held material, but it is not the only cloud route: subsequent authorized
+tests of the standard command mapping succeeded for both U100 and U300. One
+Unlock followed by one Lock was accepted for each tested model, with matching
+status readback. The U100 was associated with an M3;
+the test used no phone-held pairing key and required no LAN connection.
 
 ## Independent evidence
 
@@ -167,10 +168,10 @@ an accepted, key-free override. Boolean operation direction must be established
 from the call site and device metadata; do not guess it from the trait name.
 The hub's own Matter-bridged lock endpoint is another distinct candidate.
 
-The important open question is **which operation the M3 can authorize and
-execute itself for this lock**. It is not yet established that copying the
-phone's lock key is necessary, nor that LANLink or Matter bridging eliminates
-that requirement for every operation.
+Subsequent tests answered the primary cloud question: the U100's declared
+LockDoor/UnlockDoor commands work through the shared `/matter/write` route
+while associated with the M3, without copying a phone key. This does not
+establish support for the separate encrypted branch or every LAN operation.
 
 ## Additional read-only discovery
 
@@ -213,7 +214,7 @@ with `--reference <separately-cloned-Aqara-LANLink-directory>`. Add
 Raw reference code, proprietary native libraries, captures, and private
 discovery records are excluded from the workflow and repository.
 
-## Next cloud validation
+## Cloud implementation and validation
 
 The experimental runtime now uses the shared collection-panel and trait-read
 routes for endpoint discovery, alongside Matter details. It binds a response
@@ -222,8 +223,9 @@ can associate a native endpoint with an Agent endpoint; names cannot.
 Matched endpoints retain the full Agent command set. Common native power,
 brightness, and color-temperature writes use `/app/qlink/trait/write`, with
 fresh capability checks and no retry through another transport. Unknown
-traits are not written. Authenticated lock-control traits take priority over
-plain Matter commands, matching the recovered app's route selection.
+traits are not written. The presence of an authenticated lock-control trait
+does not invalidate separately declared standard commands; the live U100
+test established that these routes can coexist.
 
 `tools/cloud_probe.py --devices` gathers private read-only evidence from all
 connected regional accounts and homes. It includes parent-device metadata,
@@ -231,15 +233,18 @@ panels, trait parameters, Matter details, and the global specification. It
 does not send scene runs, lock commands, or trait writes. Evidence is confined
 to the private Aqara cache with mode `0600`; the tool and evidence are excluded
 from workflow packages. Offline tests establish parsing and request behavior;
-they do not establish successful physical hub execution.
+the separate authorized live command tests establish cloud acceptance and
+reported lock-state transitions. Human observation of mechanical movement was
+not part of those API tests.
 
-1. Authenticate the owning account against its correct regional cloud.
-2. Read device panels, traits, and available command definitions, including
-   parent-hub associations, without assuming Zigbee devices have Matter details.
-3. Establish which U100 operation can be executed by its owning M3 and what
-   permissions or authorization it requires.
-4. Test one selected operation with explicit physical-test authorization and
-   verify actual state. Preserve the existing Agent functionality throughout.
+The runtime downloads Aqara's current gzip endpoint definitions from
+GET `/app/qlink/specf/config/url`, validates the advertised MD5 and size,
+and reads the `configs` list as data. An inventory model selects its endpoint
+definition; a live LockState read must confirm the device before definition
+commands become available. This avoids bundled per-model drivers and covers
+Zigbee devices whose `/matter/dev/detail` response is unavailable. The standard
+LockDoor/UnlockDoor command paths then use the same `/matter/write` body as
+native Matter locks. Execution rechecks the device's home/model and endpoint.
 
 Public developer API coverage and mobile private API coverage must be tested
 separately; their credentials and permissions are not interchangeable.
@@ -267,8 +272,12 @@ therefore does not establish an executable cloud lock route.
 returned by parent relationships and bridge metadata. It also reads each
 identified hub's Matter details, so a hub-owned lock endpoint can be checked
 without assuming the U100 itself supports `/matter/dev/detail`. No bridge
-binding, unbinding, or device reconfiguration is performed. All three queries
-remain unverified against a live authenticated account.
+binding, unbinding, or device reconfiguration is performed. Live queries
+returned an empty gateway-detail result, code `9999` for the gateway-eligibility
+query, and bridge-subdevice support metadata. These results did not expose
+a usable Matter lock endpoint. Standard cloud command execution nevertheless
+succeeded, so bridge eligibility and `/matter/dev/detail` must not be used
+as the sole tests of cloud control support.
 
 ## Optional LAN validation
 

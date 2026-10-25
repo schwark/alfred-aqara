@@ -30,11 +30,17 @@ provisioning is not assumed to be a prerequisite for the hub approach.
 
 ## Finding
 
-Mobile-account authentication, home/device discovery, and lock-state reads
-are now verified against the service. The U100 and U300 app plugins expose
-different control paths. Neither lock nor unlock has been sent or verified.
-The released and installed Alfred workflow still uses Aqara Agent; this
-research does not add mobile lock control to the workflow.
+Mobile-account authentication, discovery, and cloud lock/unlock are verified
+against the service for U100 and U300. With explicit test authorization, one
+Unlock followed by one Lock was sent to each tested model. Both requests were
+accepted, with matching status readback. These are API/state observations; no human
+observation of mechanical movement was recorded.
+
+The parallel `aqm` workflow implements this shared cloud route and retains
+Agent fallback for existing controls. It is isolated from the stable `aq`
+installation. The U100 uses Aqara's server-maintained endpoint definitions
+plus live trait confirmation; it does not need a phone-held pairing key for
+the tested standard command route.
 
 The U100's Zigbee remote-control branch encrypts a command with a phone-stored
 pairing key. The U300's Matter branch delegates to the app's Android
@@ -42,19 +48,21 @@ pairing key. The U300's Matter branch delegates to the app's Android
 recovered that protected implementation: it uses a common cloud writer
 with a command-path/value map and optional hashed device password. The
 examined writer contains no per-model control dispatch. This makes a
-capability-driven integration a stronger lead, while device coverage and
-actual lock movement remain unverified. An HTTP success, advertised
+capability-driven integration possible. The later common-route tests
+supersede the assumption that U100 cloud control must use the encrypted
+plugin branch. Other device/firmware coverage and human-observed mechanical
+movement remain unverified. An HTTP success, advertised
 capability, and observed physical movement are separate checks.
 
 ### Evidence levels
 
 | Level | Meaning | Examples |
 | --- | --- | --- |
-| Live-tested | A signed request succeeded against the service | Login, home/device lists, U100 and U300 status reads |
+| Live-tested | A signed request succeeded against the service | Login, discovery, U100/U300 unlock followed by lock with reported-state transitions |
 | App-code finding | Read directly from the official APK or a model plugin | Native U300 control bridge, U100 encryption and pairing-key setup |
 | Runtime-recovered app code | Protected code extracted from the running APK, repaired for analysis, and decompiled | Shared `/matter/write` request builder and general trait/command interfaces |
 | Community claim | Described by the pinned independent reference, not validated here for these models | D100 cloud control, BLE handshake response contents, local P2P transport |
-| Unresolved | No working implementation or conclusive live control result yet | U100 remote-key acquisition outside the phone; acceptance of the recovered control request; physical movement |
+| Unresolved | Not established by the API tests | Other device/firmware coverage; human-observed mechanical movement; the separate encrypted plugin route |
 
 ### Relationship to the existing workflow
 
@@ -65,13 +73,13 @@ The Agent API and mobile API are separate interfaces:
 | Authentication | Agent bearer key | Aqara Home account login, followed by signed requests with a session token |
 | Home selection | Agent home context, including the `position_id` header | Home/device discovery and explicit `positionId` or `did` parameters |
 | Device identity | Agent endpoint IDs and generic device families | Mobile `did`, hardware `model`, and sometimes Matter metadata |
-| Lock support established here | Status | Status plus control-path discovery; working lock/unlock remains unverified |
+| Lock support established here | Status | U100/U300 cloud lock/unlock with state readback |
 
 An Agent key cannot be substituted for a mobile session. An Agent device
 type such as `DoorLock` also does not identify the mobile hardware model or
-prove that any particular command is supported. A future integration must
-establish a mapping between those identities rather than matching by name
-alone. Keep account sessions and selected homes separate: a home switch
+prove that any particular command is supported. The integration uses exact
+device/endpoint IDs and explicit home links when the APIs expose different
+IDs; names alone never automatically route an operation. Keep account sessions and selected homes separate: a home switch
 within an account should not accidentally reuse a different account's
 session, region, or device catalog.
 
@@ -132,8 +140,8 @@ been validated for authentication and the reads above:
 - Password: MD5 hex text, encrypted with RSA PKCS#1 v1.5, then Base64 encoded.
 - Signature: MD5 of the app ID, nonce, timestamp, optional nonempty session
   token, request payload, and shared app key, in the expected order.
-- GET parameters are signed before URL encoding; POST parameters use compact
-  JSON. Field order is preserved.
+- GET parameters are sorted by key and signed before URL encoding. POST uses
+  the exact compact JSON body, preserving its field order.
 - Mobile sessions are separate from Aqara Agent bearer keys.
 
 The reference's US hostname returned HTTP 500. Aqara's official
@@ -252,7 +260,7 @@ different whitespace, escaping, or field ordering can invalidate a signature.
 The successful experiments do not establish that fields must be sorted;
 the implementation preserves insertion order.
 
-For GET, concatenate fields in order as raw `key=value` pairs separated
+For GET, sort fields by key, then concatenate raw `key=value` pairs separated
 by `&`, sign that unescaped string, then URL-encode the fields for transport.
 For example, a device-detail query signs a JSON array in the raw `dids`
 value; its brackets and quotes are percent-encoded only in the URL.
@@ -519,8 +527,8 @@ after issuing remote control. Returning from the write function alone
 should not be presented to an Alfred user as confirmed lock movement.
 
 No pairing key has been extracted, no Bluetooth pairing has been attempted,
-and no remote-function setting has been changed. A separate mobile control
-route could exist; the inspected branch does not establish one.
+and no remote-function setting has been changed. Later tests verified the
+separate standard cloud command route documented below.
 
 The community D100 implementation reports `/matter/write` control with
 `pwd` and `type` fields. That report is model-specific and does not validate
@@ -618,7 +626,7 @@ does not establish an HTTP method, payload, permission, or working feature.
 
 | Candidate route | Evidence and limit |
 | --- | --- |
-| `/matter/write` | APK string and shared plugin writer; U100/U300 control not tested |
+| `/matter/write` | Shared APK writer; U100/U300 Unlock and Lock accepted with reported-state changes |
 | `/dev/lock/query` | APK string; community reference describes credential metadata; not called |
 | `/dev/bluetooth/login/assure/publickey` | APK string; community BLE authentication lead; not called |
 | `/dev/bluetooth/login/assure/verify` | APK string; community BLE authentication lead; not called |
@@ -1027,10 +1035,11 @@ probe; `mobile_backend.py` adds a small explicit write allowlist. The research
 probe itself still refuses device writes.
 
 The experiment preserves current commands through imported Agent profiles,
-adds mobile home/device discovery and shared Matter lock actions, and shows
+adds mobile home/device discovery and shared cloud lock actions, and shows
 coverage gaps with `aqm parity`. It is a hybrid experiment, not evidence of full
 mobile-only parity. The common writer has no per-model command dispatch. An
-endpoint must advertise DoorLock command 35010 or 35011, and capabilities are
+endpoint must advertise DoorLock command 35010 or 35011 through Matter metadata
+or current model definitions confirmed by a live trait read. Capabilities are
 queried again before execution. The native device-password dialog is supported;
 legacy paired encrypted lock transport is not.
 
@@ -1045,23 +1054,24 @@ Additional scene routes confirmed in the recovered app code:
 contains `scenes` and `count`. `HomeCardApi.executeScene` declares the POST route;
 `CardSceneRepository.executeScene` constructs the two-field body. These are
 request-construction findings, not successful live scene execution. Existing
-Agent scenes retain their verified route when scene IDs match exactly.
+Agent scenes retain their existing route. Additional mobile scenes have
+distinct entries and a Mobile suffix when names collide.
 
 The catalog walker supports paginated homes (`homeId`, `homeName`), devices
 (`did`), and scenes (`sceneId`), rejects repeated/incomplete pages, and retains
 prior catalogs on failure. Cross-API home/device association requires exact
-identifiers; display-name similarity never selects a write target. Native
+identifiers or an explicit saved home link; display-name similarity never
+automatically selects a write target. Native
 status is reduced to known resource fields before reaching Alfred's subtitle.
 
 Validation covers stable feature preservation after import, multiple profiles,
 home-switch rollback, exact endpoint revalidation, cancellation, password
 rejection, timeout without retries/fallback, resource formatting, scene request
 construction, explicit packaging, and isolated update channels. Tests use
-invented accounts/devices. A fresh live mobile session was unavailable during
-implementation because credential stores required unlocking. Read-only live
-Agent refreshes verified that imported profiles retained the previous device
-command sets and scenes. No lock or scene
-was actuated as part of this validation. Do not treat passing fixture tests as
+invented accounts/devices. Live read-only refreshes verified that imported
+profiles retained their previous device command sets and scenes. Later
+authorized lock-command tests are documented separately below; scene
+execution was not part of those tests. Passing fixture tests alone are not
 physical execution evidence.
 
 ## Shared cloud endpoint implementation
@@ -1106,12 +1116,11 @@ existing compatible Agent route, selected before any write. Known native
 status fields are formatted as subtitle text; metadata and arbitrary JSON
 values are omitted.
 
-The authenticated lock-control trait `40000` takes priority over plain Matter
-commands in the recovered app. The experiment therefore withholds plain
-lock/unlock when either returned schema advertises that trait. The presence
-of `RemoteUnlock` alone is not treated as proof that authenticated control can
-be skipped. U100 hub execution and both locks' physical operations remain
-unverified.
+The recovered app's inspected switch UI prioritizes trait `40000`, but later
+live tests established that separately declared LockDoor/UnlockDoor commands
+can also work for U100 through the M3. The implementation now uses those
+declared command mappings after live device-state confirmation. It does not
+guess a `RemoteUnlock` boolean or reproduce the encrypted plugin path.
 
 `tools/cloud_probe.py --devices` reads all saved mobile accounts and homes,
 global definitions, inventories, panels, traits, and extended metadata. It
@@ -1120,7 +1129,7 @@ devices. Its detailed evidence is restricted to the private Aqara cache with
 mode `0600`; stdout contains counts and safe error codes. Session fields are
 removed from saved responses. This research tool is excluded from workflow
 packages. Offline regression tests cover binding, unit conversion, range
-validation, authenticated-route priority, no retry after failure, endpoint
+validation, coexistence of authenticated traits and standard commands, no retry after failure, endpoint
 merging, retained Agent functionality, and private evidence handling.
 
 Read-only bridge discovery now includes GET `/dev/query/gateway/detail`
@@ -1131,4 +1140,74 @@ POST `/app/dev/matter/bridge/subdevice` (`positionId`, `gatewayId`), all below
 states, not executable lock commands. The private evidence tool's `--bridges`
 mode follows returned gateway relationships and reads the hubs' Matter
 metadata. Bind/unbind APIs are excluded from the discovery client's allowlist.
-These routes have not yet been validated with an authenticated live session.
+Authenticated reads returned bridge-subdevice metadata, an empty gateway-detail
+result, and code `9999` for bridge-gateway eligibility. These bridge results
+did not determine whether the standard cloud commands worked.
+
+## Verified shared cloud lock route
+
+Authorized tests sent exactly one Unlock and one Lock to a U300, and then the
+same sequence to a U100 associated with an M3. The regional cloud accepted
+both commands in each sequence. Fresh reads confirmed the requested states.
+No phone-held pairing key,
+Bluetooth provisioning, LAN connection, or bridge reconfiguration was used.
+This proves the tested cloud command and readback path; it does not replace
+human observation of the mechanism or establish support for all firmware.
+
+Both models used this identical request construction:
+
+```text
+POST /app/v1.0/lumi/matter/write
+{did:"<device-id>",pwd:"",data:{"<endpoint>.148.35011.0":""},type:0}
+{did:"<device-id>",pwd:"",data:{"<endpoint>.148.35010.0":""},type:0}
+```
+
+The route name does not imply a Matter-only device restriction. U100's
+`/matter/dev/detail` read returned code `7167`, yet its declared standard
+commands worked through `/matter/write`. The inspected encrypted plugin
+branch is an alternative path, not a prerequisite for the tested hub/cloud
+operation. Likewise, an authenticated-control trait can coexist with valid
+standard commands.
+
+### Server-maintained endpoint definitions
+
+GET `/app/qlink/specf/config/url` with no query fields returns `fileName`,
+`modifyTime`, `version`, `url`, and `md5`. The returned download is **gzip**,
+not a ZIP archive. Its JSON root is `{configs:[...]}`; each entry contains
+`subjectModel` and `endpoints`. Each endpoint supplies `endpointId`,
+`deviceTypes`, and `functions`; a function contains `functionId`,
+`functionCode`, and `traitConfigList`.
+
+A trait/config row supplies `traitId`, `traitCode`, `traitType`, property
+mapping, access bits, bounds, enums, and optional method/parameters.
+`traitType=0` denotes traits; `traitType=1` denotes commands. U100's current
+definition declares LockDoor `35010` and UnlockDoor `35011`, mapped to a
+target-value command service. Its separate `RemoteUnlock` semantic enum is
+inverted (`True` maps to `0`, `False` to `1`), another reason not to guess
+boolean control semantics. The implementation uses command IDs instead.
+
+The runtime downloads these definitions as data, verifies the advertised MD5,
+limits compressed and expanded sizes, and sends no account/app headers to
+the download host. Only HTTPS Aqara/recognized AIoT storage hosts are allowed;
+redirects are disabled. Definitions are cached outside the package for one
+day. An exact inventory model selects candidate endpoints; actual per-device
+trait reads confirm them. Definition-only commands stay unavailable until a
+matching live LockState value is returned. Execution also rechecks the
+device's model, home, exact endpoint, current profile, and saved home link.
+No bundled model catalogue or per-model command handler is needed.
+
+### Canonical GET signing and home IDs
+
+Unsorted GET parameters produced code `106`. Sorting query keys removed that
+signature failure and made scene discovery work. GET signing and URL encoding
+now use the same sorted fields, with raw values used for the digest. POST
+continues to sign the exact transmitted compact JSON. The legacy paginated
+`/app/qlink/config` query returned code `302`; the gzip definition route works.
+
+Agent home IDs can be opaque and differ from mobile home IDs. `aqm home link`
+stores an explicit association in that profile's local settings; names do
+not automatically link homes or devices. Exact device/subject IDs still
+determine writes. Original Agent endpoints and scenes remain available, and
+native entries with duplicate names receive a Mobile suffix. These local
+links, sessions, catalogues, downloaded definitions, and test evidence are
+excluded from repository and workflow assets.

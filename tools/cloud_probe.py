@@ -17,7 +17,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common import AqaraError
-from cloud_capabilities import panel_endpoints
+from cloud_capabilities import definition_endpoints, panel_endpoints
 from mobile_backend import MobileStore
 from mobile_transport import MobileAPIError
 
@@ -55,7 +55,7 @@ def error_code(exc):
     return {"error": "query_failed", "code": exc.code} if isinstance(exc, MobileAPIError) else {"error": "query_failed"}
 
 
-def inspect_device(client, row, home_id=None, bridges=False):
+def inspect_device(client, row, home_id=None, bridges=False, definitions=None):
     did = str(row["did"])
     result = {"catalog_entry": row}
     for name, call in (("panels", client.panels), ("matter", client.matter_details), ("details", client.details)):
@@ -64,6 +64,8 @@ def inspect_device(client, row, home_id=None, bridges=False):
         except AqaraError as exc:
             result[name] = error_code(exc)
     endpoints = panel_endpoints(result.get("panels"), did)
+    if definitions:
+        endpoints += definition_endpoints(definitions, str(row.get("model") or ""))
     paths = sorted({path for endpoint in endpoints for path in endpoint["paths"]})
     result["trait_pages"] = []
     for start in range(0, len(paths), 300):
@@ -89,12 +91,19 @@ def inspect_profile(store, include_devices=False, bridges=False):
         result["specification"] = client.specification()
     except AqaraError as exc:
         result["specification"] = error_code(exc)
+    definitions = None
+    if include_devices:
+        try:
+            definitions = client.definitions()
+            result["endpoint_definitions"] = definitions
+        except AqaraError as exc:
+            result["endpoint_definitions"] = error_code(exc)
     device_count = 0
     for home in homes:
         identifier = str(home.get("homeId") or home["positionId"])
         devices = client.catalog("devices", identifier)
         device_count += len(devices)
-        inspected = [inspect_device(client, row, identifier, bridges) for row in devices] if include_devices else devices
+        inspected = [inspect_device(client, row, identifier, bridges, definitions) for row in devices] if include_devices else devices
         entry = {"catalog_entry": home, "devices": inspected}
         if bridges:
             # Only query gateways identified by returned device relationships
