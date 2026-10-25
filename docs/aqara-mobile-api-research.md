@@ -16,6 +16,7 @@ Contents:
 - [U100 encrypted control and pairing keys](#u100-encrypted-remote-control-branch)
 - [U300 Matter control and authorization](#u300-matter-capabilities-and-native-authorization)
 - [Other route leads and failed experiments](#additional-route-leads-and-inconclusive-results)
+- [Runtime capture and recovered common control API](#runtime-capture-and-recovered-common-control-api)
 - [Probe usage, validation, and remaining work](#probe-validation-and-remaining-work)
 
 ## Finding
@@ -27,11 +28,14 @@ The released and installed Alfred workflow still uses Aqara Agent; this
 research does not add mobile lock control to the workflow.
 
 The U100's Zigbee remote-control branch encrypts a command with a phone-stored
-pairing key. The U300's Matter branch delegates control to the app's native
-`AHDoorLock.controlLockState` module. Its advertised commands are confirmed,
-but the native module's final authorization and request handling remain
-untraced. An HTTP success, advertised capability, and observed physical lock
-movement are separate checks.
+pairing key. The U300's Matter branch delegates to the app's Android
+`AHDoorLock.controlLockState` module. A follow-up emulator investigation
+recovered that protected implementation: it uses a common cloud writer
+with a command-path/value map and optional hashed device password. The
+examined writer contains no per-model control dispatch. This makes a
+capability-driven integration a stronger lead, while device coverage and
+actual lock movement remain unverified. An HTTP success, advertised
+capability, and observed physical movement are separate checks.
 
 ### Evidence levels
 
@@ -39,8 +43,9 @@ movement are separate checks.
 | --- | --- | --- |
 | Live-tested | A signed request succeeded against the service | Login, home/device lists, U100 and U300 status reads |
 | App-code finding | Read directly from the official APK or a model plugin | Native U300 control bridge, U100 encryption and pairing-key setup |
+| Runtime-recovered app code | Protected code extracted from the running APK, repaired for analysis, and decompiled | Shared `/matter/write` request builder and general trait/command interfaces |
 | Community claim | Described by the pinned independent reference, not validated here for these models | D100 cloud control, BLE handshake response contents, local P2P transport |
-| Unresolved | No working implementation or conclusive runtime trace yet | U100 remote-key acquisition outside the phone; U300 native authorization; actual lock movement |
+| Unresolved | No working implementation or conclusive live control result yet | U100 remote-key acquisition outside the phone; acceptance of the recovered control request; physical movement |
 
 ### Relationship to the existing workflow
 
@@ -542,9 +547,10 @@ being assumed for every lock model.
 
 `RemoteUnLockPwdHandler.ts` delegates lock/unlock to native
 `AHDoorLock.controlLockState`, passing `did`, `model`, `cmdId`, and an empty
-JavaScript `value`. This does not prove that the eventual HTTP request has
-no additional authorization. The native implementation is protected in the
-APK and has not been dynamically traced.
+JavaScript `value`. During the initial static investigation, the protected
+Android implementation was unavailable. The runtime follow-up below
+recovered its request builder and password handling. No real device-control
+request has been executed or captured.
 
 ### Native bridge versus cloud writer
 
@@ -565,8 +571,9 @@ its argument as `{did, data}`. The community D100 client adds `pwd: ""`
 and `type: 0` and reports physical control for that model. These are three
 different pieces of evidence: a native bridge invocation, a shared cloud
 writer, and another model's reported implementation. Their combination
-does not establish the final U300 wire request or prove that an empty
-device password is accepted.
+initially did not establish the U300 request builder. The runtime follow-up
+now confirms the same envelope in the Android helper. Service acceptance
+and whether a particular device permits an empty password remain untested.
 
 The app's UI also checks that the device is bound to Aqara Matter and that
 its Matter connection is online before offering the remote Matter branch.
@@ -637,7 +644,7 @@ not performed.
 | Experiment | Observed result | What was learned |
 | --- | --- | --- |
 | US login using the community hostname `rpc-us.aqara.com` | HTTP 500 | Correcting to the SDK/APK host `aiot-rpc-usa.aqara.com` allowed authentication; this failure was not sufficient evidence of bad credentials |
-| GET `/app/model/info` with only a `model` parameter | API code `302` | That query shape was not sufficient; required parameters and code meaning were not established |
+| GET `/app/model/info` with only a `model` parameter | API code `302` | Runtime-recovered `DeviceApi.querySupportMatterController` later identified `matterVid` and `matterPid` query fields; this is a controller-discovery interface, rather than a general model-name lookup. The corrected query has not been replayed |
 | Matter detail request against a U100 record | API code `7167` | No usable Matter detail from that request; do not assign a general error meaning or conclude every alternate control route is impossible |
 | Legacy named-resource status query against U300 | Successful empty list | Try the model-appropriate numeric resources; an empty list alone is not a device-state value |
 | U300 resource query without the `.1` suffix | Successful empty list | Use the app's full trait subscription path; the corrected read returned a value |
@@ -654,6 +661,232 @@ on a successful HTTP response. Preserve numeric diagnostics while keeping
 server messages and response bodies out of user-visible errors and logs,
 since they may include private data. Retry behavior, clock-skew tolerance,
 and rate-limit responses have not been measured.
+
+## Runtime capture and recovered common control API
+
+Follow-up performed on 2026-10-24 after the initial static investigation.
+The original Aqara APK and its checksum above were retained. The app was
+installed unmodified in an isolated, headless Android 13 ARM64 emulator.
+No account was signed into the Android app and no physical device operation,
+pairing, credential-management action, or lock-control method was invoked.
+
+### Toolchain and capture boundaries
+
+| Component | Version or configuration used |
+| --- | --- |
+| Android command-line tools | 22.0; Mac ARM archive build `15859902` |
+| Android Emulator | `37.2.12.0`, build `16428233` |
+| System image | Android 13 / API 33, `google_apis;arm64-v8a`, root-capable image |
+| Frida client and Android server | `17.24.3`, matching versions |
+| frida-tools | `14.11.0` |
+| mitmproxy | `12.3.0` in the isolated Python environment |
+| uiautomator2 | `3.7.1` |
+| Python for instrumentation | `3.12.13` |
+| Decompiler | JADX `1.5.6` |
+
+The SDK archive was downloaded from Google's official
+[Android tools page](https://developer.android.com/studio) and checked
+against SHA-256
+`835b62a26162b229b441d1f6d4680383815a270809eb33522c0d480fa5002c4e`.
+SDK components were installed with the documented
+[SDK package manager](https://developer.android.com/tools/sdkmanager).
+The Python environment, SDK, emulator state, proxy CA, captures, and runtime
+code remain outside the source checkout in local research storage.
+
+The capture proxy listened on host loopback and the emulator used the
+corresponding `10.0.2.2` address. Its CA was installed into the emulator's
+system certificate directory using an emulator overlay; the Mac's trust
+store was not changed. Frida ran only in the selected emulator. No APK
+repackaging, TLS-unpinning hook, or anti-tamper bypass was needed for the
+observed pre-login traffic and runtime inspection.
+
+The captured Aqara traffic included GET
+`/app/v1.0/lumi/term/not/login/list`, returning HTTP 200. The JSON envelope
+contained `result`, `code`, `requestId`, `message`, and `msgDetails`.
+Only field names are recorded here. This establishes that interception
+works for that pre-login endpoint. It does not establish that every
+authenticated or control endpoint has the same pinning behavior.
+
+The successful authenticated reads described earlier remain separate prior
+experiments. No signed-in Android app traffic or control request is claimed
+from this capture.
+
+### Recovering the protected code
+
+Frida could inspect `com.lumi.arn.pkgs.ahdoorlock.AHDoorLockModule` while
+the app was still on its initial consent screen. Standard DEX headers were
+present in anonymous mappings, allowing recovery of the app's unpacked
+code without logging in. The selected APK exposed 16 anonymous DEX images.
+
+A dump limited to the DEX header's `file_size` was incomplete: protected
+methods had been relocated beyond that original boundary. For example,
+the door-lock class's `controlLockState` code offset exceeded the declared
+image size. JADX rejected the initial copies with checksum and out-of-range
+code errors. Extending each dump to the next DEX image in its mapping,
+then adjusting `file_size`, `data_size`, SHA-1, and Adler-32 in analysis
+copies, recovered readable implementations. The original APK was unchanged.
+The repaired images successfully decompiled the target classes.
+
+This is runtime-assisted code recovery, rather than a packet capture of
+lock/unlock. Android-side Kotlin/Java code exposed through React Native is
+called the native module here; recovering it does not imply that a separate
+C/C++ lock protocol was executed.
+
+Relevant recovered classes:
+
+- `com.lumi.arn.pkgs.ahdoorlock.AHDoorLockModule`.
+- `com.lumi.arn.pkgs.ahdoorlock.AHDoorLockHelper`.
+- `com.lumi.arn.pkgs.ahdoorlock.AHDoorLockHelper$showNativeDialog$1$1`.
+- `com.lumi.arn.common.net.RNHttpApi`.
+- `com.lumi.module.matter.core.request.MatterWriteRequest`.
+- `com.lumi.module.matter.impl.aqara.api.AqaraMatterApi`.
+- `com.lumi.module.alink.model.api.AiotSpecApi`.
+- `com.lumi.sdk.device.function.common.model.ISpecDeviceHttpApi`.
+
+The proprietary DEX images and decompiled source are private research
+artifacts and are not committed or redistributed.
+
+### Confirmed common request builder
+
+The call chain is:
+
+```text
+AHDoorLockModule.controlLockState(did, model, cmdId, value)
+  -> AHDoorLockHelper.sendControlLockCommand(...)
+  -> AHDoorLockHelper.writeLockCommand(...)
+  -> RNHttpApi.writeMatterCommand(body)
+  -> POST /app/v1.0/lumi/matter/write
+```
+
+The recovered helper constructs this envelope:
+
+```json
+{"did":"<did>","pwd":"<device-password-md5-or-empty>","data":{"<command-path>":"<value>"},"type":0}
+```
+
+For a nonempty supplied device password, the helper computes lowercase
+MD5 hexadecimal text before assigning `pwd`. Empty input stays empty.
+This is a separate device-password transformation from the RSA-protected
+Aqara account-login password. A lock/unlock path uses the command IDs
+described above and an empty command value in the inspected JavaScript.
+
+`model` is used in local password/cache keys and is not placed in this
+request envelope. The examined helper routes commands by `did` and command
+path, with no per-model dispatch in the writer. The Retrofit declaration
+independently confirms the HTTP method and route. General Matter request
+DTOs also contain `did`, `data: Map<String, String>`, and `type`, defaulting
+`type` to `0`; the door-lock helper adds the `pwd` field itself.
+
+This establishes the Android request-construction code, not the service's
+acceptance of it. Normal API interceptors may still add headers or other
+transport handling. There is no captured successful control transaction
+or evidence that every lock family can use this route. In particular,
+the U100 plugin's legacy encrypted tunnel remains a distinct observed
+app branch, and its Matter-detail read did not succeed.
+
+### Device-password authorization behavior
+
+The recovered helper treats error `1703` as a reason to display its device
+password dialog. It keeps local password-cache timing and attempt state
+with keys incorporating the device ID and model. Its constants specify
+five password attempts and a `60000` millisecond local lock period.
+These are app-side behaviors; server enforcement and lockout policy were
+not exercised or inferred from deliberate bad-password requests.
+
+The password-entry listener passes the entered text into the shared writer,
+where the MD5 transformation occurs. The decompiler reported control-flow
+warnings around the cache-expiration branch, so precise cache reuse and
+expiry behavior should not be copied from the reconstructed Java without
+an additional bytecode/runtime check. A reusable client should handle
+authorization explicitly rather than duplicate that UI/cache logic blindly.
+
+### Generic trait and command interfaces
+
+Recovered `AiotSpecApi` methods expose these common routes:
+
+| Operation | Method and path | Recovered request fields |
+| --- | --- | --- |
+| Read traits | POST `/app/qlink/trait/read` | `devices`, `needParam` |
+| Send command | POST `/matter/write` | `did`, `data` |
+| Send command batch | POST `/matter/write/batch` | `list`, optional `source` |
+| Write traits | POST `/app/qlink/trait/write` | `deviceId`, `traits` |
+| Write trait batch | POST `/app/qlink/batch/trait/write` | Batch request type; full body not inspected |
+
+Paths in this table are relative to `/app/v1.0/lumi`. The read body is:
+
+```json
+{"devices":[{"deviceId":"<did>","traits":[{"path":"<trait-path>","needSubscribe":false}]}],"needParam":true}
+```
+
+`AiotSpecReadTraitRequest` defaults `needParam` to false, while the other
+shared SDK's `SpecDeviceReadTraitBody` defaults it to true. The path-item
+type defaults `needSubscribe` to false. A trait write item has `path`
+and an arbitrary `value`; a command item has `did` and a string-valued
+`data` map. These typed interfaces are common across devices, rather
+than separate methods for every product. Exact trait-path interpretation,
+parameter metadata, device coverage, and wire responses have not been
+validated for this Qlink route. It is not added to the mobile probe's
+live-tested route allowlist.
+
+`StudioSpecApi` separately names `/open/api/v1/devices/trait/read`,
+`/open/api/v1/devices/command/execute`, and
+`/open/api/v1/devices/trait/execute`, using a `StudioRequestBody` type.
+Those have a different prefix and may use a different service/authentication
+context. They are route leads only; no call or compatibility claim is made.
+
+### Reproduction tools and validation
+
+- `tools/mobile_capture_guard.py`: mitmproxy addon allowing known login/read
+  POST routes while blocking other Aqara POST requests and obvious mutation
+  paths. It is an HTTP guard, not a firewall for Bluetooth, native Matter,
+  or every possible side-effecting GET; device controls must remain unused.
+- `tools/mobile_runtime_agent.js`: Frida Java bridge, class reflection,
+  and DEX image discovery/export. It invokes no lock control methods.
+- `tools/mobile_runtime_probe.py`: selects an emulator explicitly, inspects
+  the app, exports complete runtime images, repairs analysis copies, and
+  requires the output directory to be outside this checkout. It reads no
+  account credential store and performs no account login.
+
+Frida 17's [Java bridge documentation](https://frida.re/docs/javascript-api/#java)
+requires `frida-java-bridge` when compiling a standalone agent. In this
+research checkout, the following compiles the agent using an ignored local
+dependency directory:
+
+```sh
+npm install --prefix .cache/capture-agent --no-audit --no-fund frida-java-bridge
+cp tools/mobile_runtime_agent.js .cache/capture-agent/agent.js
+frida-compile .cache/capture-agent/agent.js -o .cache/capture-agent/agent.bundle.js
+python tools/mobile_runtime_probe.py --device emulator-5560 \
+  --agent-bundle .cache/capture-agent/agent.bundle.js
+```
+
+Use the isolated instrumentation environment's `python` and `frida-compile`,
+with the matching server already running in that emulator. The default
+output is `$HOME/.cache/alfred-aqara/android/private/runtime-probe` with
+directory mode `0700` and output files `0600`. `--pid` can attach to an
+existing app process. The probe was run independently against the selected
+emulator, recovered 16 images, and its repaired output successfully
+decompiled the door-lock module again.
+
+Five additional offline tests cover the proxy guard's read allowance,
+blocked controls/password writes, unknown POSTs, encoded paths, and domain
+handling. These supplement actual emulator/tool execution; they do not
+validate a lock-control operation. Research scripts remain excluded from
+the workflow release file allowlist.
+
+### Architectural implication
+
+The recovered code gives a concrete basis for a generic pipeline:
+discover per-device capabilities, select a supported trait/command path,
+and use a shared request transport with explicit session and device-password
+handling. Global catalog metadata alone still does not establish support.
+Missing device metadata or authorization should produce an unsupported
+action, rather than an accumulating table of guessed model-specific commands.
+
+The existence of the common writer revises the earlier uncertainty about
+the Android bridge. It does not establish that it replaces the encrypted
+U100 branch, that every family is compatible, or that it is stable enough
+to ship. The released workflow continues to use Aqara Agent.
 
 ## Probe, validation, and remaining work
 
@@ -672,7 +905,8 @@ automatically retried.
 
 The ten probe tests cover encryption, signing, reference parsing, session
 handling, regional routing, Matter reads, the route allowlist, redirects,
-and safe errors. The full suite passes 94 tests on Python 3.9 and 3.14.
+and safe errors. With the five capture-guard tests, the full suite passes
+99 tests on Python 3.9 and 3.14.
 
 ### Reproducing the read-only probe
 
@@ -724,10 +958,10 @@ larger than 4 MiB. Its socket timeout is not a full wall-clock deadline.
 
 ### Remaining questions and next experiments
 
-1. Trace `AHDoorLock.controlLockState` in a running app and identify its
-   final destination, request body, device-password handling, and any
-   additional cryptographic authorization. Merely finding `/matter/write`
-   in the APK does not answer those questions.
+1. Validate the recovered shared request builder against service behavior
+   under an agreed physical test procedure. Its route, request construction,
+   and password transformation are now known from runtime-recovered code;
+   successful control, interceptor behavior, and device coverage remain open.
 2. Determine a supported U100 key-provisioning or transfer process. Establish
    how device permissions, Bluetooth login, key IDs, and existing phone keys
    interact before attempting any setup that changes the lock.
@@ -742,12 +976,12 @@ larger than 4 MiB. Its socket timeout is not a full wall-clock deadline.
    Verify both reported state and observed lock movement, then handle
    device errors and offline states before exposing it in Alfred.
 
-The Android SDK/emulator, instrumented runtime, and capture harness were
-absent during this investigation. No emulator, Frida session, authenticated
-app network capture, or runtime native-code trace was used. Static analysis
-exposed class/method and route strings in protected libraries but did not
-recover the native control implementation. Lack of a decoded implementation
-is a tooling limit, not proof that the API cannot support control.
+The initial static phase lacked an instrumented Android runtime. The
+follow-up above installed one, demonstrated pre-login TLS capture, and
+recovered the protected Android implementation. Authenticated Android app
+traffic and real control requests remain uncaptured. Future work should
+preserve that distinction instead of describing decompiled code as a
+successful live device operation.
 
 The released workflow does not expose lock/unlock on the strength of static
 evidence alone. Any future result must distinguish request acceptance,
@@ -766,3 +1000,10 @@ pairing material, decrypted caches, or unredacted traffic captures.
 Workflow packaging uses the explicit allowlist in `workflow-build`, which
 excludes this document, the probe, all downloaded sources, and research
 artifacts; documenting a route does not enable it in the shipped workflow.
+
+After the runtime session, the emulator, Frida server, and proxy were
+stopped. The traffic flow was encrypted to the existing local GPG self key
+and its plaintext copy removed. The installed SDK and isolated tooling
+remain available for later research. Rebuilding the workflow produced the
+same SHA-256 as the published v0.2.7 package; this investigation changed
+research documentation and tools only.
