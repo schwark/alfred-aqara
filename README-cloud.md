@@ -42,13 +42,13 @@ option; it does not require a second workflow or keyword.
 
 ## Connect Cloud mode
 
-Install [Aqara-0.3.3.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.3/Aqara-0.3.3.alfredworkflow)
+Install [Aqara-0.3.4.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.4/Aqara-0.3.4.alfredworkflow)
 from [GitHub Releases](https://github.com/schwark/alfred-aqara/releases/latest).
 Both modes are included. To build from the repository instead:
 
 ```sh
 python3 workflow-build
-open dist/Aqara-0.3.3.alfredworkflow
+open dist/Aqara-0.3.4.alfredworkflow
 ```
 
 1. Run `aq mode cloud`. If the earlier parallel workflow was configured,
@@ -207,8 +207,9 @@ using either mode; the chosen mode and each mode's connections survive upgrades.
 - `aq workflow:autoupdate` enables automatic checks, the default.
 - `aq workflow:noautoupdate` disables automatic checks.
 
-`aq work` and `aq workflow:u` offer Tab completion to `workflow:update` in
-either mode. Results refresh while a background check runs. The first use after
+`aq up` offers both device refresh and workflow update; `aq update` continues
+to refresh devices. `aq work` and `aq workflow:u` also offer Tab completion to
+`workflow:update` in either mode. Results refresh while a background check runs. The first use after
 an upgrade checks again; manual updates always fetch GitHub's current release list.
 
 Complete an upgrade in Alfred's import dialog. Saved accounts, home links,

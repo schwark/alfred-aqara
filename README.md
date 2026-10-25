@@ -31,9 +31,9 @@ devices from the selected mode; Cloud does not append the Agent inventory.
 These steps connect the default Agent mode. For Cloud, switch with `aq mode cloud`
 and follow [the Cloud setup guide](README-cloud.md#connect-cloud-mode).
 
-1. Download [Aqara-0.3.3.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.3/Aqara-0.3.3.alfredworkflow)
+1. Download [Aqara-0.3.4.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.4/Aqara-0.3.4.alfredworkflow)
    and open it to import into Alfred. To build from source, run
-   `python3 workflow-build` and open `dist/Aqara-0.3.3.alfredworkflow`.
+   `python3 workflow-build` and open `dist/Aqara-0.3.4.alfredworkflow`.
 2. Type `aq login` in Alfred and press Return. Sign in with your Aqara account.
 3. Copy the **aqara_api_key** shown on the page. Type `aq apikey` in Alfred and
    press Return to paste it into the secure dialog. It is saved in macOS Keychain.
@@ -67,7 +67,7 @@ connections remain available. Then use `aq mode cloud` and follow
 [the Cloud guide](README-cloud.md#connect-cloud-mode) if you want Cloud controls.
 For migration from the earlier parallel workflow, see
 [Cloud migration](README-cloud.md#upgrading-from-the-parallel-workflow).
-Changes and validation are in the [v0.3.3 release notes](docs/releases/v0.3.3.md).
+Changes and validation are in the [v0.3.4 release notes](docs/releases/v0.3.4.md).
 
 ## Commands
 
@@ -188,7 +188,9 @@ the release, verifies its SHA-256 checksum, bundle identity, and version, then
 opens Alfred's import dialog. Confirm the upgrade there to finish installing.
 Releases requiring a newer Alfred version are skipped.
 
-Type `aq work` or `aq workflow:u` and press Tab to complete `workflow:update`.
+Type `aq up` to choose between refreshing devices and updating the workflow.
+`aq update` continues to refresh devices. `aq work` and `aq workflow:u` also
+offer Tab completion to `workflow:update`.
 Alfred refreshes the results while a background check is running, so an available
 release appears without typing another query. The first use after an upgrade
 checks again instead of retaining the previous version's daily result. Manual
@@ -276,7 +278,7 @@ profile. The build uses an explicit file allowlist and excludes local data,
 tests, `.git`, and credentials. Both macOS's Python 3.9 and current Homebrew
 Python are supported.
 
-The v0.3.3 suite passes 178 offline tests on Python 3.9 and 3.14. Tests cover
+The v0.3.4 suite passes 179 offline tests on Python 3.9 and 3.14. Tests cover
 mode persistence, migration rollback, account/home isolation, stale selections,
 native capability checks, retained Agent controls, and verified update downloads.
 The offline suite does not send physical device commands.

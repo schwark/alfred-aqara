@@ -276,6 +276,10 @@ def build_items(query, store=None, updater=None):
         if term and "workflow:".startswith(term):
             result = [item(title, subtitle, action, keyword, "update:" + keyword)
                       for keyword, title, subtitle, action in commands] + result
+        elif term:
+            result.extend(item(title, subtitle, action, keyword, "update:" + keyword)
+                          for keyword, title, subtitle, action in commands
+                          if keyword.partition(":")[2].startswith(term))
     if not term or "mode".startswith(term):
         result.append(item("Mode: " + store.mode.title(), "Switch between Agent and Cloud", autocomplete="mode ", uid="mode"))
     if not term:

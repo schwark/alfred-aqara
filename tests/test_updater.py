@@ -167,6 +167,17 @@ class UpdaterTest(unittest.TestCase):
         self.assertTrue(any(row['autocomplete'] == 'workflow:update' for row in rows))
         self.assertTrue(any(row.get('autocomplete', '').startswith('Work Light') for row in rows))
 
+    def test_short_update_search_offers_refresh_and_upgrade_without_changing_update(self):
+        for query in ('up', 'upd', 'update'):
+            with self.subTest(query=query):
+                rows = build_items(query, self.store, self.updater)
+                actions = [json.loads(row['arg'])['action'] for row in rows if 'arg' in row]
+                self.assertEqual(actions, ['update', 'workflow_update'])
+                self.assertEqual(rows[1]['autocomplete'], 'workflow:update')
+        for query, enabled in (('auto', True), ('noauto', False)):
+            row = build_items(query, self.store, self.updater)[0]
+            self.assertEqual(json.loads(row['arg'])['enabled'], enabled)
+
     def test_filter_refreshes_while_background_check_runs_then_shows_release(self):
         self.store.workflow_root = self.store.root
         with patch.object(workflow_filter, 'get_store', return_value=self.store), \
