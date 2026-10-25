@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import os
+from contextlib import redirect_stdout
 from pathlib import Path
 import plistlib
 import subprocess
@@ -13,6 +14,7 @@ from urllib.request import Request
 from zipfile import ZipFile
 
 import command
+import filter as workflow_filter
 from common import AqaraError, BUNDLE_ID, Store
 from filter import build_items
 from updater import GitHubRedirects, REPOSITORY, UPDATE_KEY, Updater, verified_download
@@ -92,6 +94,28 @@ class UpdaterTest(unittest.TestCase):
         spawn.assert_not_called()
         self.assertFalse(Updater(self.store.root, '0.2.6').enabled())
 
+    def test_upgrade_checks_again_despite_previous_daily_cache_and_backoff(self):
+        self.updater.workflow.cache_data(UPDATE_KEY, {'available': False})
+        release_key = 'github-releases-' + REPOSITORY.replace('/', '-')
+        self.updater.workflow.cache_data(release_key, b'old release list')
+        self.updater.workflow.settings['__aqara_check_version'] = '0.2.5'
+        self.updater.workflow.settings['__aqara_next_check'] = 10**12
+        with patch.object(background, 'run_in_background') as spawn:
+            self.updater.schedule()
+            self.updater.schedule()
+        spawn.assert_called_once()
+        self.assertIsNone(self.updater.workflow.cached_data(UPDATE_KEY, max_age=0))
+        self.assertIsNone(self.updater.workflow.cached_data(release_key, max_age=0))
+        self.assertEqual(self.updater.workflow.settings['__aqara_check_version'], '0.2.6')
+
+    def test_disabled_checks_keep_existing_cache_after_upgrade(self):
+        self.updater.set_enabled(False)
+        self.cache_update()
+        with patch.object(background, 'run_in_background') as spawn:
+            self.updater.schedule()
+        spawn.assert_not_called()
+        self.assertEqual(self.updater.available()['version'], '1.0.0')
+
     def test_background_runner_inherits_isolated_directories(self):
         with patch.object(background, 'is_running', return_value=False), patch.object(background.subprocess, 'run') as run:
             run.return_value.returncode = 0
@@ -131,6 +155,37 @@ class UpdaterTest(unittest.TestCase):
             refresh.assert_not_called()
         self.keys.get.assert_not_called()
 
+    def test_workflow_commands_complete_from_partial_namespace(self):
+        for query in ('w', 'work', 'workflow', 'WORKFLOW:', 'workflow:u', 'workflow:update'):
+            with self.subTest(query=query):
+                row = build_items(query, self.store, self.updater)[0]
+                self.assertEqual(row['autocomplete'], 'workflow:update')
+                self.assertEqual(json.loads(row['arg'])['action'], 'workflow_update')
+        self.store.write('catalog', {'home_id': 'example-home', 'devices': [
+            {'id': 'example-light', 'name': 'Work Light', 'type': 'Light'}], 'scenes': []})
+        rows = build_items('work', self.store, self.updater)
+        self.assertTrue(any(row['autocomplete'] == 'workflow:update' for row in rows))
+        self.assertTrue(any(row.get('autocomplete', '').startswith('Work Light') for row in rows))
+
+    def test_filter_refreshes_while_background_check_runs_then_shows_release(self):
+        self.store.workflow_root = self.store.root
+        with patch.object(workflow_filter, 'get_store', return_value=self.store), \
+                patch.object(workflow_filter, 'Updater', return_value=self.updater), \
+                patch.object(self.updater, 'schedule'), \
+                patch.object(background, 'is_running', side_effect=[True, False]), \
+                patch.object(sys, 'argv', ['filter.py', 'workflow:u']):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                workflow_filter.main()
+            self.assertEqual(json.loads(output.getvalue())['rerun'], 0.5)
+            self.cache_update()
+            output = io.StringIO()
+            with redirect_stdout(output):
+                workflow_filter.main()
+            response = json.loads(output.getvalue())
+            self.assertNotIn('rerun', response)
+            self.assertEqual(response['items'][0]['title'], 'Aqara 1.0.0 is available')
+
     def test_install_uses_framework_download_job_and_hides_failures(self):
         downloads = Download.from_releases(json.dumps([release('1.0.0')]))
         with patch.object(update, 'get_downloads', return_value=downloads), patch.object(background, 'run_in_background') as spawn:
@@ -140,6 +195,19 @@ class UpdaterTest(unittest.TestCase):
             with self.assertRaises(AqaraError) as caught:
                 self.updater.install()
         self.assertNotIn('private diagnostic', str(caught.exception))
+
+    def test_manual_update_discards_cached_release_list(self):
+        release_key = 'github-releases-' + REPOSITORY.replace('/', '-')
+        self.updater.workflow.cache_data(release_key, b'old release list')
+        def check(*args):
+            self.assertIsNone(self.updater.workflow.cached_data(release_key, max_age=0))
+            return False
+        with patch.object(update, 'check_update', side_effect=check):
+            self.assertIn('up to date', self.updater.install())
+
+    def test_check_progress_failure_does_not_break_search(self):
+        with patch.object(background, 'is_running', side_effect=OSError('unavailable')):
+            self.assertFalse(self.updater.checking())
 
     def test_background_failure_and_corrupt_cache_do_not_break_search(self):
         with patch.object(self.updater.workflow, 'check_update', side_effect=subprocess.SubprocessError()):

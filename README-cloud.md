@@ -207,6 +207,10 @@ using either mode; the chosen mode and each mode's connections survive upgrades.
 - `aq workflow:autoupdate` enables automatic checks, the default.
 - `aq workflow:noautoupdate` disables automatic checks.
 
+`aq work` and `aq workflow:u` offer Tab completion to `workflow:update` in
+either mode. Results refresh while a background check runs. The first use after
+an upgrade checks again; manual updates always fetch GitHub's current release list.
+
 Complete an upgrade in Alfred's import dialog. Saved accounts, home links,
 and Keychain credentials live outside the installed workflow and survive
 upgrades. `aq update` refreshes devices and scenes; it does not upgrade the workflow.

@@ -70,7 +70,16 @@ class Updater:
         """Use Hubitat's background check, with a retry delay when GitHub is down."""
         try:
             self._bind()
-            if not self.enabled() or self.workflow.cached_data_fresh(UPDATE_KEY, 86400):
+            if not self.enabled():
+                return
+            if self.workflow.settings.get("__aqara_check_version") != self.version:
+                # An upgrade must not inherit the previous version's daily result
+                # or failure backoff, including caches from older workflow builds.
+                self.workflow.cache_data(UPDATE_KEY, None)
+                self.workflow.cache_data("github-releases-" + REPOSITORY.replace("/", "-"), None)
+                self.workflow.settings["__aqara_next_check"] = 0
+                self.workflow.settings["__aqara_check_version"] = self.version
+            if self.workflow.cached_data_fresh(UPDATE_KEY, 86400):
                 return
             if time.time() < float(self.workflow.settings.get("__aqara_next_check", 0)):
                 return
@@ -79,9 +88,19 @@ class Updater:
         except CACHE_ERRORS + (subprocess.SubprocessError,):
             pass  # Update infrastructure must not interrupt device search.
 
+    def checking(self):
+        try:
+            self._bind()
+            from workflow import background
+            return background.is_running("__workflow_update_check")
+        except CACHE_ERRORS:
+            return False
+
     def install(self):
         try:
             self._bind()
+            # A manual request always checks GitHub, including just-published releases.
+            self.workflow.cache_data("github-releases-" + REPOSITORY.replace("/", "-"), None)
             if self.workflow.start_update():
                 return "Downloading the Aqara update. Confirm the upgrade in Alfred when it opens."
             return "Aqara " + self.version + " is up to date."

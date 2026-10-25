@@ -273,6 +273,9 @@ def build_items(query, store=None, updater=None):
         result = _build_items(query, store)
         if getattr(store, "is_cloud", False):
             result = store.decorate_items(query, result)
+        if term and "workflow:".startswith(term):
+            result = [item(title, subtitle, action, keyword, "update:" + keyword)
+                      for keyword, title, subtitle, action in commands] + result
     if not term or "mode".startswith(term):
         result.append(item("Mode: " + store.mode.title(), "Switch between Agent and Cloud", autocomplete="mode ", uid="mode"))
     if not term:
@@ -281,6 +284,8 @@ def build_items(query, store=None, updater=None):
     if status:
         result.insert(0, item("Aqara " + status["version"] + " is available", "Install the update · Confirm the upgrade in Alfred",
                               {"action": "workflow_update"}, "workflow:update", "workflow-update"))
+    if not result:
+        result = [item("No matching devices or scenes", "Try a room or device name, or aq update to refresh")]
     for row in result:
         if "arg" in row:
             action = json.loads(row["arg"])
@@ -381,10 +386,11 @@ def _build_items(query, store):
             result.insert(0, item("Choose a home", "Select which home's devices and scenes to browse", autocomplete="home "))
         else:
             result.insert(0, item("Set up Aqara", "Use aq login, aq apikey, then aq update"))
-    return result or [item("No matching devices or scenes", "Try a room or device name, or aq update to refresh")]
+    return result
 
 
 def main():
+    refresh = False
     try:
         query = sys.argv[1] if len(sys.argv) > 1 else ""
         if query.strip().casefold().partition(" ")[0] == "mode":
@@ -393,11 +399,15 @@ def main():
             store = get_store()
             updater = Updater(store.workflow_root)
             updater.schedule()
+            refresh = updater.checking()
             result = build_items(query, store, updater)
     except (AqaraError, KeychainError, OSError) as exc:
         result = [item("Aqara unavailable", str(exc))]
         print("Aqara: " + str(exc), file=sys.stderr)
-    print(json.dumps({"items": result}, ensure_ascii=False))
+    response = {"items": result}
+    if refresh:
+        response["rerun"] = 0.5
+    print(json.dumps(response, ensure_ascii=False))
 
 
 if __name__ == "__main__":

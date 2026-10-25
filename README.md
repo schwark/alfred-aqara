@@ -188,6 +188,12 @@ the release, verifies its SHA-256 checksum, bundle identity, and version, then
 opens Alfred's import dialog. Confirm the upgrade there to finish installing.
 Releases requiring a newer Alfred version are skipped.
 
+Type `aq work` or `aq workflow:u` and press Tab to complete `workflow:update`.
+Alfred refreshes the results while a background check is running, so an available
+release appears without typing another query. The first use after an upgrade
+checks again instead of retaining the previous version's daily result. Manual
+update requests always fetch the current release list from GitHub.
+
 Use `aq workflow:noautoupdate` to turn off automatic checks, and
 `aq workflow:autoupdate` to turn them back on. `aq update` continues to refresh
 your Aqara devices, homes, and scenes. Upgrades preserve the selected mode,
@@ -270,7 +276,7 @@ profile. The build uses an explicit file allowlist and excludes local data,
 tests, `.git`, and credentials. Both macOS's Python 3.9 and current Homebrew
 Python are supported.
 
-The v0.3.3 suite passes 172 offline tests on Python 3.9 and 3.14. Tests cover
+The v0.3.3 suite passes 178 offline tests on Python 3.9 and 3.14. Tests cover
 mode persistence, migration rollback, account/home isolation, stale selections,
 native capability checks, retained Agent controls, and verified update downloads.
 The offline suite does not send physical device commands.
