@@ -98,6 +98,28 @@ Next steps are a read-only mobile login and device discovery, followed by
 inspection of model capabilities and the matching app plugin or captured
 request. Command acceptance and observed lock movement are separate checks.
 
+## Read-only probe implementation
+
+`tools/mobile_api.py` is an experimental standard-library client for validating
+the documented mobile sign-in and discovery wire formats. It permits only the
+login, home list, device list, device detail, and resource-query routes. Control
+routes and lock credential enumeration are rejected before any network request.
+HTTPS redirects are rejected; request failures expose numeric codes without
+server response messages. Passwords and session tokens are kept in memory.
+
+The `AppIdentity.from_reference()` loader reads literal app constants from the
+separately downloaded reference's `const.py` using Python's AST; it does not
+execute the reference code or embed shared app keys in this repository. The
+reference identifies its wire identity as app version 6.1.6. Acceptance by the
+current service remains unverified; this is separate from inspection of the
+official 6.4.0 APK. Every sign-in requires an explicit API area and country
+district. Authentication is not retried automatically.
+
+The module is excluded from the workflow release's explicit file allowlist.
+Its nine tests cover encryption, signing, reference parsing, session handling,
+the route allowlist, redirects, and safe failure messages. The complete suite
+passes 93 tests on Python 3.9 and 3.14. No authenticated result is claimed yet.
+
 APK, libraries, decoded resources, and third-party reference source are kept in
 `.cache/`, ignored by Git and excluded from Alfred releases. The installed
 workflow remains unchanged by this research.
