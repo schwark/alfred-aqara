@@ -42,13 +42,13 @@ option; it does not require a second workflow or keyword.
 
 ## Connect Cloud mode
 
-Install [Aqara-0.3.2.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.2/Aqara-0.3.2.alfredworkflow)
+Install [Aqara-0.3.3.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.3/Aqara-0.3.3.alfredworkflow)
 from [GitHub Releases](https://github.com/schwark/alfred-aqara/releases/latest).
 Both modes are included. To build from the repository instead:
 
 ```sh
 python3 workflow-build
-open dist/Aqara-0.3.2.alfredworkflow
+open dist/Aqara-0.3.3.alfredworkflow
 ```
 
 1. Run `aq mode cloud`. If the earlier parallel workflow was configured,

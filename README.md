@@ -31,9 +31,9 @@ devices from the selected mode; Cloud does not append the Agent inventory.
 These steps connect the default Agent mode. For Cloud, switch with `aq mode cloud`
 and follow [the Cloud setup guide](README-cloud.md#connect-cloud-mode).
 
-1. Download [Aqara-0.3.2.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.2/Aqara-0.3.2.alfredworkflow)
+1. Download [Aqara-0.3.3.alfredworkflow](https://github.com/schwark/alfred-aqara/releases/download/v0.3.3/Aqara-0.3.3.alfredworkflow)
    and open it to import into Alfred. To build from source, run
-   `python3 workflow-build` and open `dist/Aqara-0.3.2.alfredworkflow`.
+   `python3 workflow-build` and open `dist/Aqara-0.3.3.alfredworkflow`.
 2. Type `aq login` in Alfred and press Return. Sign in with your Aqara account.
 3. Copy the **aqara_api_key** shown on the page. Type `aq apikey` in Alfred and
    press Return to paste it into the secure dialog. It is saved in macOS Keychain.
@@ -67,7 +67,7 @@ connections remain available. Then use `aq mode cloud` and follow
 [the Cloud guide](README-cloud.md#connect-cloud-mode) if you want Cloud controls.
 For migration from the earlier parallel workflow, see
 [Cloud migration](README-cloud.md#upgrading-from-the-parallel-workflow).
-Changes and validation are in the [v0.3.2 release notes](docs/releases/v0.3.2.md).
+Changes and validation are in the [v0.3.3 release notes](docs/releases/v0.3.3.md).
 
 ## Commands
 
@@ -270,7 +270,7 @@ profile. The build uses an explicit file allowlist and excludes local data,
 tests, `.git`, and credentials. Both macOS's Python 3.9 and current Homebrew
 Python are supported.
 
-The v0.3.2 suite passes 172 offline tests on Python 3.9 and 3.14. Tests cover
+The v0.3.3 suite passes 172 offline tests on Python 3.9 and 3.14. Tests cover
 mode persistence, migration rollback, account/home isolation, stale selections,
 native capability checks, retained Agent controls, and verified update downloads.
 The offline suite does not send physical device commands.
